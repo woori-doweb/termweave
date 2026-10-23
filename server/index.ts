@@ -7,7 +7,7 @@ import { OpenRigService, OpenRigServiceError } from "./openrig-service.ts";
 import { TerminalNotifications } from "./terminal-notifications/api.ts";
 import { boundedJson } from "./openrig/runtime.ts";
 import { MobileRelayGateway } from "./mobile-relay/gateway.ts";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { statSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, isAbsolute } from "node:path";
@@ -70,7 +70,7 @@ import { handleHerdrUpdateRequest, HerdrUpdater } from "./herdr-update.ts";
 import { handleUsageRequest, UsageService } from "./usage.ts";
 import { handleVoiceRequest, VoiceService } from "./voice.ts";
 
-import { BRIDGE_PROTOCOL } from "../shared/machines.ts";
+import { BRIDGE_PROTOCOL, OWNED_STOP_HEADER, OWNED_STOP_PATH, type BridgeHealth } from "../shared/machines.ts";
 import { bridgeIdentity, registerBridge, socketPath } from "./bridge.ts";
 import { MachineManager } from "./machines.ts";
 import { handleMachineRequest } from "./machine-api.ts";
@@ -154,6 +154,9 @@ const SERVER_FEATURES: ServerFeature[] = ["submit", "secret-input", "input-ready
 
 /** Bind addresses only this machine can reach, so an unset token is nobody else's business. */
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1"]);
+/** how long a stop's 202 gets to reach the client before the server stops listening */
+const OWNED_STOP_FLUSH_MS = 100;
+const digest = (value: string) => createHash("sha256").update(value).digest();
 
 const AGENT_LABELS: Record<string, string> = {
   claude: "Claude Code",
@@ -293,6 +296,8 @@ export function createServer(
     openrig?: OpenRigRuntime;
     openrigService?: OpenRigService;
     mobileRelay?: MobileRelayGateway;
+    /** the owned launcher's stop token and what a verified stop request runs (OWNED_STOP_PATH); unset, the route does not exist */
+    ownedStop?: { token: string; stop: () => void };
   } = {},
 ): { port: number; hostname: string; stop: () => void } {
   const attachments = new Map<string, PaneAttachment>();
@@ -519,6 +524,23 @@ export function createServer(
   const terminalNotifications = new TerminalNotifications(options.stateDir ?? defaultStateDir(), clientSnapshot);
   const machines = options.machines === false ? null : new MachineManager(options.stateDir ?? defaultStateDir(), push, completions, clientSnapshot);
   const bridgeToken = randomBytes(32).toString("hex");
+  const ownedStop = options.ownedStop;
+  const ownedStopDigest = ownedStop ? digest(ownedStop.token) : null;
+  let ownedStopAccepted = false;
+  /** OWNED_STOP_PATH before every other gate: its own checks replace the session auth and origin rules, never widen them. */
+  const ownedStopResponse = (request: Request, peer: string | null, port: number | undefined): Response => {
+    const refuse = (status: number, code: string) => jsonResponse({ error: { code, message: "owned stop refused" } }, status);
+    if (request.method !== "POST") return refuse(405, "method_not_allowed");
+    if (peer === null || !isLoopbackAddress(peer) || cameThroughProxy(request.headers)) return refuse(403, "loopback_only");
+    const host = (request.headers.get("host") ?? "").toLowerCase();
+    if (port === undefined || ![`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`].includes(host)) return refuse(403, "invalid_host");
+    if (request.headers.has("origin") || request.headers.has("sec-fetch-site")) return refuse(403, "browser_request");
+    const presented = request.headers.get(OWNED_STOP_HEADER);
+    if (presented === null || !timingSafeEqual(digest(presented), ownedStopDigest!)) return refuse(403, "invalid_stop_token");
+    // The answer goes out first; a repeated request while stopping is answered the same way and starts nothing new.
+    if (!ownedStopAccepted) { ownedStopAccepted = true; setTimeout(() => ownedStop!.stop(), OWNED_STOP_FLUSH_MS); }
+    return jsonResponse({ ok: true, stopping: true }, 202, { connection: "close" });
+  };
 
   function broadcast(paneId: string, message: ServerMessage): void {
     const attachment = attachments.get(paneId);
@@ -959,6 +981,7 @@ export function createServer(
       const bridgeAuthorized = isAuthenticated(request, bridgeToken);
       const bridgePath = pathname === "/api/bridge" || pathname === "/api/session" || pathname === "/api/agents" || pathname.startsWith("/api/pane/") || pathname.startsWith("/api/workspace/") || pathname.startsWith("/api/fs/") || pathname === "/ws";
       const ip = bunServer.requestIP(request);
+      if (ownedStop && pathname === OWNED_STOP_PATH) return ownedStopResponse(request, ip?.address ?? null, bunServer.port);
       const access = decideAccess({
         loopback: ip !== null && isLoopbackAddress(ip.address),
         forwarded: cameThroughProxy(request.headers),
@@ -1127,7 +1150,8 @@ export function createServer(
         const auth: HealthAuth = access.level === "full"
           ? { required: false, authenticated: true, via: access.via, role: access.role }
           : { required: true, authenticated, ...(authenticated ? {} : { reason: access.reason }) };
-        if (url.searchParams.get("scope") === "bridge") return jsonResponse({ ok: true, auth, bridge_protocol: BRIDGE_PROTOCOL });
+        // liveness and launch identity only: the owned lifecycle's probe, which answers whether herdr runs or not
+        if (url.searchParams.get("scope") === "bridge") return jsonResponse({ ok: true, auth, bridge_protocol: BRIDGE_PROTOCOL, boot_id: process.env["HERDR_WEB_BOOT_ID"] ?? null } satisfies BridgeHealth);
         try {
           const info = await ping();
           // a forced answer (tests) and a runtime without the PTY sidecar are told the way a Windows herdr's own would be
@@ -2003,10 +2027,14 @@ export function createServer(
 }
 
 if (import.meta.main) {
+  // The owned launcher's stop token lives in this variable only: nothing this process spawns inherits it, nothing logs it.
+  const ownedStopToken = process.env["TERMWEAVE_STOP_TOKEN"] ?? "";
+  delete process.env["TERMWEAVE_STOP_TOKEN"];
   if (existsSync(join(import.meta.dir, '..', '.termweave-owned.json')) && process.env.TERMWEAVE_OWNED_LAUNCH !== '1') throw new Error('Owned installation requires the recorded foreground lifecycle launcher');
+  if (process.env.TERMWEAVE_OWNED_LAUNCH === '1' && ownedStopToken.length < 32) throw new Error('Owned launch requires the launcher stop token');
   const configuredHost = process.env.HOST ?? '127.0.0.1';
   if (!LOOPBACK_HOSTNAMES.has(configuredHost) && (!process.env.HERDR_WEB_TOKEN || process.env.TERMWEAVE_EXTERNAL_ACCESS !== '1')) throw new Error('External binding requires TERMWEAVE_EXTERNAL_ACCESS=1 and a configured token');
-  const instance = createServer({ updates: connectUpdater(), registerBridge: true });
+  const instance = createServer({ updates: connectUpdater(), registerBridge: true, ...(ownedStopToken.length >= 32 ? { ownedStop: { token: ownedStopToken, stop: () => shutdown() } } : {}) });
   let stopping = false;
   const shutdown = () => {
     if (stopping) return;

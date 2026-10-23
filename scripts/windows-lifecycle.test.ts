@@ -18,7 +18,7 @@ function copyClosure(root:string,entry:string){
 const FIXTURE_SERVER=`if(process.env.TERMWEAVE_OWNED_LAUNCH!=='1')throw new Error('fixture requires the owned launcher');
 const boot=process.env.HERDR_WEB_BOOT_ID??null;
 const server=Bun.serve({port:Number(process.env.PORT),hostname:process.env.HOST,fetch(request){const url=new URL(request.url);
- if(url.pathname==='/api/health')return Response.json(url.searchParams.get('scope')==='bridge'?{ok:true}:{ok:true,web_ui:{boot_id:boot}});
+ if(url.pathname==='/api/health')return Response.json(url.searchParams.get('scope')==='bridge'?{ok:true,boot_id:boot}:{ok:true,web_ui:{boot_id:boot}});
  return new Response('fixture',{status:404});}});
 console.log('fixture listening on '+server.hostname+':'+server.port+' boot '+boot);
 `;

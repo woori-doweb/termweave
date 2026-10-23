@@ -71,7 +71,15 @@ export interface SetupJob {
 }
 export type SetupAction = { action: "answer"; challenge_id: string; answer: string } | { action: "approve" } | { action: "cancel" };
 export type MachineEvent = { type: "machines"; machines: Machine[] } | { type: "machine-message"; machine_id: string; message: ServerMessage };
-export interface BridgeHealth { ok: true; auth: HealthAuth; bridge_protocol: number }
+/**
+ * The owned lifecycle's stop request (scripts/install-lifecycle.ts stop, the owned launcher's Ctrl+C). The server has it only when
+ * its launcher handed it a stop token, and answers a loopback CLI alone: POST, its own port in Host, no Origin or Sec-Fetch-Site
+ * (even same-origin), and that token in OWNED_STOP_HEADER. The token never goes in a URL.
+ */
+export const OWNED_STOP_PATH = "/api/lifecycle/stop";
+export const OWNED_STOP_HEADER = "x-termweave-stop-token";
+/** Bridge liveness, never waiting for herdr; boot_id is this launch's HERDR_WEB_BOOT_ID (null when launched without one). */
+export interface BridgeHealth { ok: true; auth: HealthAuth; bridge_protocol: number; boot_id: string | null }
 export interface BridgeIdentity {
   pid: number;
   managed_remote: boolean;

@@ -1,7 +1,7 @@
-import {afterAll,describe,expect,it} from 'bun:test';import {chmodSync,mkdirSync,mkdtempSync,readdirSync,rmSync,writeFileSync} from 'node:fs';import {join,posix,resolve,win32} from 'node:path';import {tmpdir} from 'node:os';
+import {afterAll,describe,expect,it} from 'bun:test';import {chmodSync,existsSync,mkdirSync,mkdtempSync,readdirSync,rmSync,writeFileSync} from 'node:fs';import {join,posix,resolve,win32} from 'node:path';import {tmpdir} from 'node:os';
 import {MIN_BUN,MIN_HERDR,WINDOWS_PRESERVED,buildChildEnv,defaultDirectories,envValue,findExecutable,isAliasCandidate,isDeniedEnv,versionGe} from './lifecycle-env.ts';
 import {check,DEFAULT_PORT,install,main,parseArgs,type Context,type Options} from './install-lifecycle.ts';
-import {canonicalPath} from './lifecycle-path.ts';
+import {canonicalPath} from './lifecycle-path.ts';import {lockPaths} from './lifecycle-lock.ts';
 const win=process.platform==='win32';
 const base=canonicalPath(mkdtempSync(join(tmpdir(),'tw-env-')));afterAll(()=>rmSync(base,{recursive:true,force:true}));
 let serial=0;
@@ -130,9 +130,12 @@ describe('install-lifecycle',()=>{
   const before=readdirSync(root).sort();
   const notRunning=context({},false);expect(await check(options(root),notRunning.ctx)).toBe(1);expect(notRunning.err).toContain('MISS  no server answers http://127.0.0.1:7399/api/health');
   const foreign=context({},true);expect(await check(options(root),foreign.ctx)).toBe(1);expect(foreign.out.some(line=>line.startsWith('note  http://127.0.0.1:7399 answers, but not from this install'))).toBe(true);
+  // A lifecycle.json that is no lifecycle record is uncertain, never an owned running instance, whatever the full health says.
   writeFileSync(join(root,'lifecycle.json'),'{}');
-  const running=context({},true);expect(await check(options(root),running.ctx)).toBe(0);
+  const uncertain=context({},true);expect(await check(options(root),uncertain.ctx)).toBe(1);
+  expect(uncertain.err.some(line=>line.startsWith('MISS  lifecycle state is uncertain: lifecycle.json still uninterpretable'))).toBe(true);
   expect(readdirSync(root).sort()).toEqual([...before,'lifecycle.json'].sort());
+  expect(existsSync(lockPaths(root).guard)).toBe(false);expect(existsSync(lockPaths(root).lock)).toBe(false);
   const missing=dir('check-missing-parent');const absent=join(missing,'never');
   expect(await check(options(absent),context({},true).ctx)).toBe(1);expect(readdirSync(missing)).toEqual([]);
  });
@@ -157,11 +160,12 @@ describe('install-lifecycle',()=>{
   expect(()=>at(['check'],{HOME:'/h',LOCALAPPDATA:'C:\\L',PORT:'abc'})).toThrow('Invalid port: abc');
   expect(()=>at(['check'],{},'win32')).toThrow('LOCALAPPDATA');
  });
- it('exits 1 for invalid arguments and for start/stop until 3C/3D',async()=>{
+ it('exits 1 for invalid arguments and for start/stop of a directory that is not an install',async()=>{
   const {ctx,err}=context();
   expect(await main(['check','--port','nope'],ctx)).toBe(1);expect(err[0]).toBe('Invalid port: nope');
-  for(const command of ['start','stop']){const run=context();expect(await main([command,'--dir',dir('never')],run.ctx)).toBe(1);expect(run.err).toEqual([`FAIL  ${command}: not yet: 3C/3D`]);}
-  const result=Bun.spawnSync([process.execPath,join(import.meta.dir,'install-lifecycle.ts'),'stop','--port','7399'],{stdout:'pipe',stderr:'pipe'});
-  expect([result.exitCode,result.stderr.toString().trim()]).toEqual([1,'FAIL  stop: not yet: 3C/3D']);
+  for(const command of ['start','stop']){const never=dir(`never-${command}`);const run=context();expect(await main([command,'--dir',never],run.ctx)).toBe(1);expect(run.err).toEqual([`FAIL  not installed at ${never} (run the installer)`]);}
+  const never=dir('never-cli');
+  const result=Bun.spawnSync([process.execPath,join(import.meta.dir,'install-lifecycle.ts'),'stop','--dir',never,'--port','7399'],{stdout:'pipe',stderr:'pipe'});
+  expect([result.exitCode,result.stderr.toString().trim()]).toEqual([1,`FAIL  not installed at ${never} (run the installer)`]);
  });
 });
