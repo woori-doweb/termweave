@@ -31,6 +31,9 @@ import type { AgentStatus, ClientRole, ConversationMetadata, InteractivePrompt, 
 import type { PaneView } from "../lib/actions.ts";
 import { useSettings, terminalTheme, terminalContrast, type Palette, type ResolvedTheme } from "../lib/settings.ts";
 import { imeEdit, imeSpaces } from "../lib/imeDiff.ts";
+import {
+  COMPOSITION_IDLE, COMPOSITION_SETTLE_MS, MIRROR_INPUT_IDLE, compositionSettled, filterMirrorInput, flushMirrorInput, type CompositionPhase,
+} from "../lib/mirrorInputPolicy.ts";
 import { loadFontStack, TERMINAL_FONT_STACK, terminalFontStack } from "../lib/fontFamily.ts";
 import { useT } from "../lib/i18n.ts";
 import { isAppShortcut } from "../lib/shortcuts.ts";
@@ -160,7 +163,53 @@ export function PaneTerminal({
   // one-shot Control from the key bar: the ref is what onData reads, the state is what the bar shows
   const composingRef = useRef(false);
   const [composing, setComposingState] = useState(false);
-  const setComposing = useCallback((active: boolean) => { composingRef.current = active; setComposingState(active); }, []);
+  // The IME's span, in the grid or the input line: compositionstart until COMPOSITION_SETTLE_MS after
+  // compositionend. A blur/focus, reset or clear inside it commits, drops or doubles the syllable being
+  // built, so a recovery asked for there waits for the span to settle (the latest of each kind runs once).
+  const compositionRef = useRef<CompositionPhase>(COMPOSITION_IDLE);
+  const settleTimerRef = useRef<number | null>(null);
+  const settledActionsRef = useRef(new Map<string, () => void>());
+  const imeSettled = (): boolean => compositionSettled(compositionRef.current, performance.now());
+  /** end the span now: `run` its waiting recoveries, or drop them (a pane change, an unmount) */
+  const settleComposition = useCallback((run: boolean) => {
+    if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = null;
+    compositionRef.current = COMPOSITION_IDLE;
+    const actions = [...settledActionsRef.current.values()];
+    settledActionsRef.current.clear();
+    if (run) for (const action of actions) action();
+  }, []);
+  const setComposing = useCallback((active: boolean) => {
+    composingRef.current = active;
+    setComposingState(active);
+    if (active === compositionRef.current.composing) return;
+    if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = null;
+    compositionRef.current = { composing: active, endedAt: active ? null : performance.now() };
+    if (!active) settleTimerRef.current = window.setTimeout(() => settleComposition(true), COMPOSITION_SETTLE_MS);
+  }, [settleComposition]);
+  /** run a recovery now, or once the IME's span settles */
+  const whenSettled = useCallback((kind: string, action: () => void) => {
+    if (imeSettled()) action();
+    else settledActionsRef.current.set(kind, action);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- imeSettled reads refs only
+  }, []);
+  /**
+   * Give the grid the keyboard. Inside the IME's span a real focus() would disturb it: when the grid's
+   * textarea already has the keyboard, xterm is only told so (a synthetic focus event); elsewhere (the
+   * input line's IME) the focus waits for the span to settle.
+   */
+  const focusTerminal = useCallback(() => {
+    const textarea = termRef.current?.textarea;
+    if (imeSettled()) { termRef.current?.focus(); return; }
+    if (textarea && document.activeElement === textarea) {
+      settledActionsRef.current.delete("focus");
+      textarea.dispatchEvent(new FocusEvent("focus"));
+      return;
+    }
+    whenSettled("focus", () => termRef.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- imeSettled reads refs only
+  }, [whenSettled]);
   const ctrlRef = useRef(false);
   // "Reconnecting" only after a connection existed: a fresh mount is connecting for the first time
   const everConnected = useRef(false);
@@ -812,12 +861,39 @@ export function PaneTerminal({
         && event.key === "Backspace" && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
         && !event.isComposing && event.keyCode !== 229;
     });
+    // A mirror's grid repaints the pane's screen: xterm answers the queries in it and reports focus and
+    // the mouse as if a program had asked, and herdr would take those answers as typed text. They are
+    // dropped there (mirrorInputPolicy.ts). A key's own data passes whole: Shift+F3 is CSI 1;2R, a
+    // cursor report's shape. onKey fires just before the key's onData.
+    let keyData: string | null = null;
+    const onMirrorKey = term.onKey(({ key }) => { keyData = key; });
+    let mirrorInput = MIRROR_INPUT_IDLE;
+    let mirrorFlush = false;
+    const flushMirror = (): void => {
+      mirrorFlush = false;
+      const out = flushMirrorInput(mirrorInput);
+      mirrorInput = out.state;
+      if (out.send) sendData(out.send);
+    };
     const onData = term.onData((data) => {
+      const typedKey = data === keyData;
+      keyData = null;
       data = imeSpaces(data);
       if (shiftEnter && data === "\r") data = "\x1b\r";
       shiftEnter = false;
       if (commandBackspace && data === "\x7f") data = "\x15";
       commandBackspace = false;
+      if (fixedGridRef.current) {
+        const out = typedKey ? flushMirrorInput(mirrorInput) : filterMirrorInput(mirrorInput, data);
+        mirrorInput = out.state;
+        data = typedKey ? out.send + data : out.send;
+        // a sequence cut off at the chunk's end goes out with the task's next chunk, or alone after it
+        if (mirrorInput.tail && !mirrorFlush) { mirrorFlush = true; queueMicrotask(flushMirror); }
+        if (!data) return;
+      }
+      sendData(data);
+    });
+    const sendData = (data: string): void => {
       const current = paneRef.current;
       if (!current || observeRef.current || secretRef.current !== null || heldRef.current) return;
       let input = data;
@@ -834,7 +910,7 @@ export function PaneTerminal({
         setDraft(EMPTY_DRAFT);
       }
       setDraft((prev) => applyToDraft(prev, input));
-    });
+    };
 
     // Browsers expose dropped files as bytes, not local paths. Save them beside
     // the pane and paste the returned paths; never send Enter with a drop.
@@ -853,7 +929,7 @@ export function PaneTerminal({
         // An upload can finish after the user has switched panes or lost input access.
         if (paneRef.current !== pane || chatViewRef.current || !socket.connected || term.options.disableStdin) return;
         term.paste(paths.map((path) => `'${path.replaceAll("'", "'\\''")}'`).join(" ") + " ");
-        term.focus();
+        focusTerminal();
       } catch (error) {
         if (paneRef.current === pane) noteClipboard(error instanceof Error ? error.message : String(error));
       }
@@ -885,7 +961,7 @@ export function PaneTerminal({
       const text = event.dataTransfer.getData("text/plain");
       if (text) {
         term.paste(text);
-        term.focus();
+        focusTerminal();
       }
     };
     host.addEventListener("paste", onFilePaste, { capture: true });
@@ -1010,6 +1086,8 @@ export function PaneTerminal({
       onShiftEnter.dispose();
       onCommandBackspace.dispose();
       onData.dispose();
+      onMirrorKey.dispose();
+      settleComposition(false);
       host.removeEventListener("paste", onFilePaste, { capture: true });
       host.removeEventListener("dragover", onDragOver);
       host.removeEventListener("drop", onDrop);
@@ -1092,7 +1170,7 @@ export function PaneTerminal({
     }
     const pane = paneRef.current;
     if (pane && term) socketRef.current?.resize(pane, term.cols, term.rows, true);
-    if (!autoSelected && !coarseRef.current) term?.focus();
+    if (!autoSelected && !coarseRef.current) focusTerminal();
   }, [chatView]);
 
   // Reset synchronously on pane changes: old composition timers must never see the new pane.
@@ -1104,7 +1182,9 @@ export function PaneTerminal({
     setEnded(false);
     setInputReady(false);
     setInputError(null);
+    // the previous pane's IME span and the recoveries waiting on it are not this pane's
     setComposing(false);
+    settleComposition(false);
     setOutputReady(false);
     setOutputError(null);
     setHeld(false);
@@ -1136,7 +1216,7 @@ export function PaneTerminal({
     socket.attach(paneId, term.cols, term.rows, chatViewRef.current);
     // the chat lens covers the grid and its composer takes the keyboard: focusing the hidden
     // grid sent the keys straight to the pane, and showed a phone's IME text mid-screen
-    if (!chatViewRef.current && !autoSelected && !coarseRef.current) term.focus();
+    if (!chatViewRef.current && !autoSelected && !coarseRef.current) focusTerminal();
     return () => {
       socket.detach(paneId);
     };
@@ -1149,7 +1229,7 @@ export function PaneTerminal({
   useEffect(() => {
     const wasAuto = autoSelectedRef.current;
     autoSelectedRef.current = autoSelected;
-    if (wasAuto && !autoSelected && !chatViewRef.current && !coarseRef.current) termRef.current?.focus();
+    if (wasAuto && !autoSelected && !chatViewRef.current && !coarseRef.current) focusTerminal();
   }, [autoSelected]);
 
   // key-bar taps go through xterm so the onData -> socket path above is reused
@@ -1159,16 +1239,16 @@ export function PaneTerminal({
     if (composingRef.current) return;
     term.input(keySequence(key, term.modes.applicationCursorKeysMode));
     // with the input line, the keyboard belongs to it: a key tap must not move it to the grid
-    if (!inputLineRef.current) term.focus();
-  }, []);
+    if (!inputLineRef.current) focusTerminal();
+  }, [focusTerminal]);
 
   const toggleCtrl = useCallback(() => {
     if (composingRef.current) return;
     const armed = !ctrlRef.current;
     ctrlRef.current = armed;
     setCtrlArmed(armed);
-    if (!inputLineRef.current) termRef.current?.focus();
-  }, []);
+    if (!inputLineRef.current) focusTerminal();
+  }, [focusTerminal]);
 
   // ask the server for the role change; the role-ack handler applies the local
   // consequences (stdin gate, grid adoption or reclamation) once it is confirmed.
@@ -1253,16 +1333,17 @@ export function PaneTerminal({
     if (!textarea) return;
     if (inputLine) {
       textarea.setAttribute("inputmode", "none");
-      if (document.activeElement === textarea) textarea.blur();
+      if (document.activeElement === textarea) whenSettled("focus", () => { if (document.activeElement === textarea) textarea.blur(); });
     } else {
       textarea.removeAttribute("inputmode");
-      if (coarse && !chatView && turnedOn) termRef.current?.focus();
+      if (coarse && !chatView && turnedOn) focusTerminal();
     }
   }, [inputLine, coarse, chatView, directTyping, paneId]);
 
   // A stalled or conflicting attach recovers in place: a link reloaded the whole page and lost
   // the composer's unsent attachments. attach() also reopens a socket the stall closed.
-  const reattach = useCallback(() => {
+  // Inside the IME's span the reset waits for it to settle.
+  const reattach = useCallback(() => whenSettled("reattach", () => {
     const term = termRef.current;
     const socket = socketRef.current;
     const pane = paneRef.current;
@@ -1272,7 +1353,7 @@ export function PaneTerminal({
     term.reset();
     term.options.disableStdin = observeRef.current;
     socket.attach(pane, term.cols, term.rows, chatViewRef.current);
-  }, []);
+  }), [whenSettled]);
 
   // the composer's stop button: Escape interrupts the agent's current turn in every
   // supported TUI (Claude Code, omp, codex) without killing the process the way ^C would

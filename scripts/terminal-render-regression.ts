@@ -5,14 +5,22 @@ import { chromiumExecutable } from './browser.ts';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createServer } from 'vite';
-import { chromium } from 'playwright-core';
+import { createServer, normalizePath, type Plugin } from 'vite';
+import { chromium, type CDPSession, type Page } from 'playwright-core';
 
 const root = resolve(import.meta.dir, '..');
 const evidence = resolve(root, 'evidence/p2b', process.env.RENDER_LABEL ?? 'candidate');
 // Reproduce the installed stack constraints without modifying any source CSS.
 const stackBaseline = process.env.RENDER_STACK_BASELINE === '1';
 const stackFix = '  flex: 1 1 0;\n  min-width: 0;\n  min-height: 0;\n  width: 100%;\n';
+// Test-only modes: --input-policy runs the mirror input/IME guard lane instead of the render lane;
+// --negative-control runs it against a PaneTerminal with those connections cut and expects them red.
+const args = process.argv.slice(2);
+const unknownArgs = args.filter(arg => arg !== '--input-policy' && arg !== '--negative-control');
+if (unknownArgs.length) throw new Error(`Unknown arguments: ${unknownArgs.join(' ')}`);
+if (args.includes('--negative-control') && !args.includes('--input-policy')) throw new Error('--negative-control applies to --input-policy only');
+
+async function renderRegression(): Promise<void> {
 mkdirSync(evidence, { recursive: true });
 const cleanup = new OwnedCleanup();
 try {
@@ -152,3 +160,281 @@ const measure = async (label: string, settled = true) => {
   writeFileSync(resolve(evidence, 'cleanup.json'), JSON.stringify(results, null, 2));
   if (results.some(result => result.status === 'FAIL')) throw new Error('Owned render cleanup failed');
 }
+}
+
+// --input-policy: the real PaneTerminal, mounted over a mock HerdrSocket transport as a mirror
+// (pane-geometry fixed) or an attach grid. What reaches the socket as `input` frames is observed.
+const INPUT_POLICY_PANE = 'policy-pane';
+const INPUT_POLICY_QUERIES = '\x1b[?1004h\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[5n\x1b[6n\x1b[?6n\x1b[c\x1b[>c';
+/** what xterm 5.5 answers to the queries, a blur+focus and a middle click (attach keeps every one) */
+const INPUT_POLICY_REPLIES = [/\x1b\[0n/, /\x1b\[\d+;\d+R/, /\x1b\[\?\d+;\d+R/, /\x1b\[\?1;2c/, /\x1b\[>0;276;0c/, /\x1b\[O/, /\x1b\[I/, /\x1b\[<1;\d+;\d+M/, /\x1b\[<1;\d+;\d+m/];
+const INPUT_POLICY_PASTE = '붙여넣기 \x1b[I reply-shaped\nnext line';
+/** abc, ArrowUp, Enter, Ctrl+C, Shift+F3 (a cursor report's shape), an IME-composed 한, a bracketed paste */
+const INPUT_POLICY_TYPED = `abc\x1b[A\r\x03\x1b[1;2R한\x1b[200~${INPUT_POLICY_PASTE.replace(/\n/g, '\r')}\x1b[201~`;
+/** the PaneTerminal connections the negative control cuts (Vite transform only; the source stays) */
+const INPUT_POLICY_CUTS = [
+  { name: 'mirror-filter', from: 'filterMirrorInput(mirrorInput, data)', to: '{ send: data, state: mirrorInput }' },
+  { name: 'composition-guard', from: 'compositionSettled(compositionRef.current, performance.now())', to: 'true' },
+] as const;
+type InputPolicyCut = typeof INPUT_POLICY_CUTS[number]['name'];
+type InputPolicyCheck = (name: string, cut: InputPolicyCut | null, ok: boolean, detail: unknown) => void;
+const INPUT_POLICY_FIXTURE = `import { useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Terminal } from '@xterm/xterm';
+import { PaneTerminal } from '../src/components/PaneTerminal.tsx';
+import { SettingsProvider } from '../src/lib/settings.ts';
+import '../src/styles.css';
+
+const policy = (window as any).policy;
+const open = Terminal.prototype.open;
+Terminal.prototype.open = function (parent) { policy.terms.push(this); return open.call(this, parent); };
+const reset = Terminal.prototype.reset;
+Terminal.prototype.reset = function () { policy.resets++; return reset.call(this); };
+function Fixture() {
+  const [autoSelected, setAutoSelected] = useState(false);
+  policy.setAutoSelected = setAutoSelected;
+  useEffect(() => { policy.autoSelected.push(autoSelected); }, [autoSelected]);
+  return <main style={{ height: '100dvh', width: '100%' }}><PaneTerminal paneId="${INPUT_POLICY_PANE}" view="terminal" terminalFontSize={14}
+    terminalWheelSpeed={1} terminalFontFamily="" theme="dark" palette="amber" role="interact" autoSelected={autoSelected} /></main>;
+}
+createRoot(document.getElementById('root')!).render(<SettingsProvider><Fixture /></SettingsProvider>);
+`;
+
+async function inputPolicyRegression(negative: boolean): Promise<void> {
+  const out = resolve(root, 'evidence/input-policy', negative ? 'negative-control' : 'candidate');
+  mkdirSync(out, { recursive: true });
+  const fixtureId = normalizePath(resolve(root, 'scripts/input-policy-fixture.tsx'));
+  const paneTerminalId = normalizePath(resolve(root, 'src/components/PaneTerminal.tsx'));
+  const applied = new Set<InputPolicyCut>();
+  const checks: { name: string; cut: InputPolicyCut | null; ok: boolean; detail: unknown }[] = [], errors: string[] = [];
+  const check: InputPolicyCheck = (name, cut, ok, detail) => {
+    checks.push({ name, cut, ok, detail });
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${cut ? ` [${cut}]` : ''} ${JSON.stringify(detail)}`);
+  };
+  const plugin: Plugin = { name: 'input-policy-fixture', enforce: 'pre',
+    resolveId(id) { return id === '/scripts/input-policy-fixture.tsx' ? fixtureId : null; },
+    load(id) { return id === fixtureId ? INPUT_POLICY_FIXTURE : null; },
+    transform(source, id) {
+      if (!negative || id.split('?')[0] !== paneTerminalId) return null;
+      let cut = source;
+      for (const { name, from, to } of INPUT_POLICY_CUTS) {
+        const found = cut.split(from).length - 1;
+        // a missing connection is a broken control, never a red
+        if (found !== 1) throw new Error(`negative control: ${name} connection found ${found} times in PaneTerminal.tsx`);
+        cut = cut.replace(from, to);
+        applied.add(name);
+      }
+      return cut;
+    },
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (!request.url?.startsWith('/input-policy-test')) return next();
+        void server.transformIndexHtml(request.url, '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><div id="root"></div><script type="module" src="/scripts/input-policy-fixture.tsx"></script></body></html>')
+          .then(html => { response.setHeader('Content-Type', 'text/html'); response.end(html); });
+      });
+    } };
+  const cleanup = new OwnedCleanup();
+  let failure: unknown = null;
+  try {
+    const vite = await createServer({ root, configFile: false, logLevel: 'warn', esbuild: { jsx: 'automatic' }, server: { host: '127.0.0.1', port: 0 }, plugins: [plugin] });
+    cleanup.add('vite', () => vite.close());
+    await vite.listen();
+    const port = (vite.httpServer!.address() as { port: number }).port;
+    const browser = await chromium.launch({ executablePath: chromiumExecutable(), headless: true });
+    cleanup.add('browser', () => browser.close());
+    for (const mode of ['mirror', 'attach'] as const) {
+      const context = await browser.newContext({ viewport: { width: 1200, height: 800 } });
+      cleanup.add(`context-${mode}`, () => context.close());
+      const page = await context.newPage();
+      page.on('pageerror', error => { errors.push(`${mode}: ${error.stack ?? error.message}`); console.error('FIXTURE_PAGE_ERROR', error.stack ?? error.message); });
+      await page.addInitScript(inputPolicyInit, { pane: INPUT_POLICY_PANE, mirror: mode === 'mirror' });
+      await page.route('**/api/**', route => route.fulfill({ json: { text: '', messages: [], prompt: null } }));
+      await page.goto(`http://127.0.0.1:${port}/input-policy-test?mode=${mode}`);
+      await until(page, () => { const policy = (window as any).policy; return policy.terms[0]?.buffer.active.getLine(0)?.translateToString().includes('POLICY') && policy.frames.some((frame: any) => frame.type === 'input-ready-sent'); }, `${mode} fixture screen`);
+      const adopted = await page.locator('.pane-terminal').evaluate(node => node.hasAttribute('data-adopted-grid'));
+      check(`${mode}-fixture-mode`, null, adopted === (mode === 'mirror'), { adopted });
+      const textarea = page.locator('.xterm-helper-textarea');
+      await textarea.focus();
+      const cdp = await context.newCDPSession(page);
+
+      // xterm's own answers: the queries in the screen, a blur+focus, a middle click
+      let from = await frameCount(page);
+      await emit(page, { type: 'pty-data', pane_id: INPUT_POLICY_PANE, data: INPUT_POLICY_QUERIES });
+      await until(page, () => { const modes = (window as any).policy.terms[0].modes; return modes.sendFocusMode && modes.bracketedPasteMode && modes.mouseTrackingMode === 'vt200'; }, `${mode} query modes`);
+      await page.evaluate(() => { const node = document.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!; node.blur(); node.focus(); });
+      const screen = await page.locator('.xterm-screen').boundingBox();
+      assert.ok(screen, 'xterm screen has no box');
+      await page.mouse.click(screen.x + 40, screen.y + 30, { button: 'middle' });
+      await Bun.sleep(300);
+      const replies = await sentSince(page, from);
+      if (mode === 'mirror') check('mirror-replies-dropped', 'mirror-filter', replies === '', { sent: replies });
+      else {
+        const missing = INPUT_POLICY_REPLIES.filter(reply => !reply.test(replies)).map(String);
+        check('attach-replies-kept', null, missing.length === 0, { sent: replies, missing });
+      }
+
+      // typed input, the same in both modes
+      from = await frameCount(page);
+      await page.keyboard.type('abc');
+      for (const key of ['ArrowUp', 'Enter', 'Control+c', 'Shift+F3']) await page.keyboard.press(key);
+      for (const text of ['ㅎ', '하', '한']) await cdp.send('Input.imeSetComposition', { text, selectionStart: 1, selectionEnd: 1 });
+      await cdp.send('Input.insertText', { text: '한' });
+      await Bun.sleep(100);
+      await textarea.evaluate((node, text) => {
+        const data = new DataTransfer();
+        data.setData('text/plain', text);
+        node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+      }, INPUT_POLICY_PASTE);
+      await Bun.sleep(200);
+      const typed = await sentSince(page, from);
+      check(`${mode}-typed-input-identical`, null, typed === INPUT_POLICY_TYPED, { sent: typed, expected: INPUT_POLICY_TYPED });
+
+      if (mode === 'mirror') await compositionGuard(page, cdp, check);
+      await cdp.detach();
+    }
+    if (negative) assert.deepEqual([...applied].sort(), INPUT_POLICY_CUTS.map(cut => cut.name).sort(), 'negative control: every cut must reach the served PaneTerminal');
+  } catch (error) {
+    failure = error;
+  } finally {
+    const results = await cleanup.run();
+    if (results.some(result => result.status === 'FAIL')) failure ??= new Error(`Owned input-policy cleanup failed: ${JSON.stringify(results)}`);
+  }
+  const red = checks.filter(entry => !entry.ok);
+  // The control is red for the right reason: every check of a cut connection fails, everything else
+  // (fixture mode, attach replies, typed input, the 350 ms release) still passes, and no page errors.
+  const expectedRed = checks.filter(entry => entry.cut !== null);
+  const status = failure !== null || errors.length ? 'ERROR'
+    : negative ? (expectedRed.length > 0 && red.length === expectedRed.length && red.every(entry => entry.cut !== null) ? 'EXPECTED_RED' : 'CONTROL_FAILED')
+      : red.length ? 'FAIL' : 'PASS';
+  writeFileSync(resolve(out, 'result.json'), JSON.stringify({ status, negative, cuts: negative ? INPUT_POLICY_CUTS : [], applied: [...applied],
+    checks, errors, failure: failure === null ? null : String(failure instanceof Error ? failure.stack : failure) }, null, 2));
+  if (failure !== null) throw failure;
+  assert.deepEqual(errors, [], 'input-policy fixture page errors');
+  if (negative) {
+    assert.equal(status, 'EXPECTED_RED', `negative control did not turn exactly the cut checks red: ${JSON.stringify(red.map(entry => entry.name))}`);
+    console.log(`PASS input-policy negative control: red as expected ${red.map(entry => entry.name).join(', ')} (evidence ${out})`);
+  } else {
+    assert.deepEqual(red.map(entry => entry.name), [], 'input-policy checks failed');
+    console.log(`PASS input policy: ${checks.length} checks (evidence ${out})`);
+  }
+}
+
+/**
+ * Inside the IME's span (compositionstart until compositionend + 350 ms) a reset and a real blur/focus
+ * must wait; at 350 ms they run. Page time is a paused Playwright clock, so 349 and 350 are exact.
+ */
+async function compositionGuard(page: Page, cdp: CDPSession, check: InputPolicyCheck): Promise<void> {
+  await emit(page, { type: 'error', code: 'output_stalled', message: 'synthetic stall', pane_id: INPUT_POLICY_PANE });
+  // the stalled-output banner's Reconnect (its label follows the browser's language)
+  const reconnect = page.locator('.terminal-banner-output-error button');
+  await reconnect.waitFor();
+  await page.locator('.xterm-helper-textarea').focus();
+  await page.clock.install();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1000);
+  const base = await probe(page);
+  const delta = async () => {
+    const now = await probe(page);
+    return { resets: now.resets - base.resets, attaches: now.attaches - base.attaches, focus: now.focus - base.focus, blur: now.blur - base.blur,
+      synthetic: now.synthetic - base.synthetic, compositionEnds: now.compositionEnds - base.compositionEnds };
+  };
+
+  await cdp.send('Input.imeSetComposition', { text: '한', selectionStart: 1, selectionEnd: 1 });
+  await reconnect.evaluate(node => (node as HTMLButtonElement).click()); // a click that leaves the IME's focus alone
+  await requestFocus(page);
+  const composing = await delta();
+  check('guard-composing-no-reset', 'composition-guard', composing.resets === 0 && composing.attaches === 0, composing);
+  check('guard-composing-no-real-blur-focus', 'composition-guard', composing.focus === 0 && composing.blur === 0, composing);
+  check('guard-composing-synthetic-focus', 'composition-guard', composing.synthetic >= 1, composing);
+
+  await cdp.send('Input.insertText', { text: '한' });
+  const ended = await delta();
+  check('guard-compositionend-seen', null, ended.compositionEnds === 1, ended);
+  await page.clock.runFor(349);
+  await requestFocus(page);
+  const at349 = await delta();
+  check('guard-349ms-no-reset', 'composition-guard', at349.resets === 0 && at349.attaches === 0, at349);
+  check('guard-349ms-no-real-blur-focus', 'composition-guard', at349.focus === 0 && at349.blur === 0, at349);
+
+  await page.clock.runFor(1);
+  await requestFocus(page);
+  const at350 = await delta();
+  check('guard-350ms-reset-released', null, at350.resets === 1 && at350.attaches === 1, at350);
+  check('guard-350ms-focus-released', null, at350.focus >= 1 && at350.blur === 0, at350);
+}
+
+/** Runs in the page before its scripts: a mock WebSocket transport and focus/blur/composition probes. */
+function inputPolicyInit({ pane, mirror }: { pane: string; mirror: boolean }): void {
+  localStorage.setItem('termweave:direct-typing', '1');
+  const policy: any = { frames: [], sockets: [], terms: [], resets: 0, autoSelected: [], calls: { focus: 0, blur: 0, synthetic: 0 }, compositionEnds: 0 };
+  (window as any).policy = policy;
+  for (const name of ['focus', 'blur'] as const) {
+    const original = HTMLElement.prototype[name];
+    HTMLElement.prototype[name] = function (this: HTMLElement, ...rest: any[]) {
+      if (this.classList.contains('xterm-helper-textarea')) policy.calls[name]++;
+      return (original as any).apply(this, rest);
+    };
+  }
+  document.addEventListener('focus', event => { if (!event.isTrusted && (event.target as Element)?.classList?.contains('xterm-helper-textarea')) policy.calls.synthetic++; }, true);
+  document.addEventListener('compositionend', () => { policy.compositionEnds++; }, true);
+  class MockSocket extends EventTarget {
+    static OPEN = 1; static CONNECTING = 0; readyState = 0;
+    constructor(public url: string) {
+      super(); policy.sockets.push(this);
+      queueMicrotask(() => { this.readyState = 1; this.dispatchEvent(new Event('open')); this.emit({ type: 'snapshot', features: ['input-ready'], panes: [], workspaces: [] }); });
+    }
+    emit(message: unknown) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(message) })); }
+    send(text: string) {
+      const message = JSON.parse(text);
+      policy.frames.push(message);
+      if (message.type === 'role') this.emit({ type: 'role-ack', mode: message.mode });
+      if (message.type === 'attach' && message.pane_id === pane) {
+        this.emit({ type: 'input-ready', pane_id: pane, ready: true });
+        policy.frames.push({ type: 'input-ready-sent' });
+        // a mirror's grid is the pane's own in herdr: every client adopts it
+        if (mirror) this.emit({ type: 'pane-geometry', pane_id: pane, cols: 100, rows: 30, fixed: true });
+        this.emit({ type: 'pty-data', pane_id: pane, data: `\x1b[2J\x1b[HPOLICY ${mirror ? 'mirror' : 'attach'} screen 한국어` });
+      }
+    }
+    close() { this.readyState = 3; }
+  }
+  Object.assign(window, { WebSocket: MockSocket });
+}
+
+async function until(page: Page, predicate: () => unknown, label: string, timeout = 15_000): Promise<void> {
+  const start = Date.now();
+  while (!(await page.evaluate(predicate))) {
+    if (Date.now() - start > timeout) throw new Error(`timed out waiting for ${label}`);
+    await Bun.sleep(25);
+  }
+}
+/** to PaneTerminal's HerdrSocket only: Vite's own HMR socket is a MockSocket too */
+function emit(page: Page, message: unknown) {
+  return page.evaluate(value => { for (const socket of (window as any).policy.sockets) if (new URL(socket.url).pathname === '/ws') socket.emit(value); }, message);
+}
+function frameCount(page: Page) { return page.evaluate(() => (window as any).policy.frames.length as number); }
+function sentSince(page: Page, from: number) {
+  return page.evaluate(start => (window as any).policy.frames.slice(start).filter((frame: any) => frame.type === 'input').map((frame: any) => frame.text).join('') as string, from);
+}
+function probe(page: Page) {
+  return page.evaluate(() => {
+    const policy = (window as any).policy;
+    return { resets: policy.resets as number, attaches: policy.frames.filter((frame: any) => frame.type === 'attach').length as number,
+      focus: policy.calls.focus as number, blur: policy.calls.blur as number, synthetic: policy.calls.synthetic as number, compositionEnds: policy.compositionEnds as number };
+  });
+}
+/** autoSelected true, then false: PaneTerminal's autoSelected effect gives the grid the keyboard */
+async function requestFocus(page: Page): Promise<void> {
+  for (const value of [true, false]) {
+    const seen = await page.evaluate(() => (window as any).policy.autoSelected.length as number);
+    await page.evaluate(next => (window as any).policy.setAutoSelected(next), value);
+    const start = Date.now();
+    while (!(await page.evaluate(([count, next]) => { const list = (window as any).policy.autoSelected; return list.length > count && list.at(-1) === next; }, [seen, value] as const))) {
+      if (Date.now() - start > 5_000) throw new Error(`timed out waiting for autoSelected=${value}`);
+      await Bun.sleep(10);
+    }
+  }
+}
+
+// last: the lanes read the constants above
+if (args.includes('--input-policy')) await inputPolicyRegression(args.includes('--negative-control'));
+else await renderRegression();
