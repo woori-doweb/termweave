@@ -1,8 +1,9 @@
 import {cpSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,writeFileSync,lstatSync,readlinkSync,rmdirSync,rmSync} from 'node:fs';import {resolve,join,isAbsolute} from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';
-import {installationSources} from './install-source.ts';import {canonicalPath,judgeDestination} from './lifecycle-path.ts';
+import {installationSources} from './install-source.ts';import {canonicalPath,judgeDestination} from './lifecycle-path.ts';import {buildChildEnv} from './lifecycle-env.ts';
 const SYSTEM_SID='S-1-5-18';
 const system32=(exe:string)=>{const root=process.env.SystemRoot;if(!root||!isAbsolute(root))throw new Error('SystemRoot is required for the owned root ACL');return join(root,'System32',exe);};
-const run=(argv:string[],cwd?:string)=>Bun.spawnSync(argv,{cwd,stdout:'pipe',stderr:'pipe'});
+/** Every child inherits the denylist-filtered environment (lifecycle-env.ts), never the raw parent with its API keys. */
+const run=(argv:string[],cwd?:string)=>Bun.spawnSync(argv,{cwd,env:buildChildEnv(process.env),stdout:'pipe',stderr:'pipe',windowsHide:true});
 /** SID of the installing account from the locale-independent SID column of `whoami /user`. */
 export function currentUserSid():string{const result=run([system32('whoami.exe'),'/user','/fo','csv','/nh']);const sid=result.exitCode===0?/"(S-1-\d+(?:-\d+)+)"\s*$/.exec(result.stdout.toString())?.[1]:undefined;if(!sid)throw new Error('Current user SID unavailable');return sid;}
 /** SDDL DACL that is protected (no inherited ACEs) and grants exactly the user and SYSTEM (OI)(CI) full control. */
@@ -22,7 +23,7 @@ export function restrictOwnedRoot(root:string){
 }
 export function installOwned(source:string,destination:string){
  const sources=installationSources(source);const sourceRoot=canonicalPath(source);
- const source_sha=execFileSync('git',['rev-parse','HEAD'],{cwd:sourceRoot,encoding:'utf8'}).trim();if(!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(source_sha))throw new Error('Source commit unavailable');
+ const source_sha=execFileSync('git',['rev-parse','HEAD'],{cwd:sourceRoot,env:buildChildEnv(process.env),encoding:'utf8',windowsHide:true}).trim();if(!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(source_sha))throw new Error('Source commit unavailable');
  const judged=judgeDestination(destination,sourceRoot);if('refused' in judged)throw new Error(judged.refused==='symlink ancestor'?'Symlink ancestor refused':`Install requires a new independent destination (${judged.refused})`);
  const root=judged.root;mkdirSync(root,{recursive:false});
  if(process.platform==='win32'){try{restrictOwnedRoot(root);}catch(error){try{rmdirSync(root);}catch{}throw error;}}
