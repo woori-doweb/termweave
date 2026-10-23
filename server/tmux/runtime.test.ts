@@ -12,7 +12,8 @@ test("action arguments reject injection, invalid directions and ambiguous target
 });
 
 // needs a real tmux binary; CI runners without one skip only this case
-test.skipIf(!Bun.which("tmux"))("private real tmux runtime: split, indexes, layouts, resize, zoom, move, swap, persistence and stale rejection", async () => {
+// POSIX-only on Windows: a Unix-socket runtime under /tmp with owner uid and 0700 mode bits; a Windows tmux.exe (psmux) is no such host (covered by CI ubuntu/macos)
+test.skipIf(process.platform === "win32" || !Bun.which("tmux"))("private real tmux runtime: split, indexes, layouts, resize, zoom, move, swap, persistence and stale rejection", async () => {
   const root = await realpath(await mkdtemp("/tmp/twp-"));
   const runtime = new TmuxRuntime(root + "/runtime");
   let socket = "";

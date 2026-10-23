@@ -8,9 +8,9 @@ const run=(argv:string[],cwd?:string)=>Bun.spawnSync(argv,{cwd,env:buildChildEnv
 export function currentUserSid():string{const result=run([system32('whoami.exe'),'/user','/fo','csv','/nh']);const sid=result.exitCode===0?/"(S-1-\d+(?:-\d+)+)"\s*$/.exec(result.stdout.toString())?.[1]:undefined;if(!sid)throw new Error('Current user SID unavailable');return sid;}
 /** SDDL DACL that is protected (no inherited ACEs) and grants exactly the user and SYSTEM (OI)(CI) full control. */
 export function isOwnedRootDacl(sddl:string,userSid:string):boolean{
- const match=/^D:([A-Z]*)((?:\([^()]*\))+)$/.exec(sddl.trim());if(!match||!match[1].includes('P'))return false;
+ const [,control='',aces='']=/^D:([A-Z]*)((?:\([^()]*\))+)$/.exec(sddl.trim())??[];if(!control.includes('P'))return false;
  const expected=new Set([userSid,SYSTEM_SID]);const seen=new Set<string>();
- for(const ace of match[2].slice(1,-1).split(')(')){const [type,flags,rights,object,inherited,trustee,...rest]=ace.split(';');const sid=trustee==='SY'?SYSTEM_SID:trustee;if(rest.length||type!=='A'||flags!=='OICI'||rights!=='FA'||object||inherited||!sid||!expected.has(sid))return false;seen.add(sid);}
+ for(const ace of aces.slice(1,-1).split(')(')){const [type,flags,rights,object,inherited,trustee,...rest]=ace.split(';');const sid=trustee==='SY'?SYSTEM_SID:trustee;if(rest.length||type!=='A'||flags!=='OICI'||rights!=='FA'||object||inherited||!sid||!expected.has(sid))return false;seen.add(sid);}
  return seen.size===expected.size;
 }
 /** Windows: one icacls pass right after root creation, before any file is written. Removes inheritance, grants (OI)(CI)F to the current user SID and SYSTEM only, then reads the DACL back with `icacls /save`. Any failure fails the install. */

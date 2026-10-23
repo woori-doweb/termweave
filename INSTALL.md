@@ -140,10 +140,10 @@ Nothing is ever killed automatically. A failed `stop` prints:
 If you decide the server has to end now, use the PowerShell command that `stop` prints. Its form is:
 
 ```
-$p=Get-CimInstance Win32_Process -Filter 'ProcessId=<pid>'; if($p -and $p.CreationDate -and $p.CreationDate.ToUniversalTime().ToString('o') -eq '<recorded start time>' -and $p.ExecutablePath -eq '<recorded exe>'){Stop-Process -Id <pid>}else{'Process <pid> changed or is gone: not stopped'}
+$p=Get-CimInstance Win32_Process -Filter 'ProcessId=<pid>'; if($p -and $p.CreationDate -and $p.CreationDate.ToUniversalTime().ToString('o') -eq '<recorded start time>'){Stop-Process -Id <pid>}else{'Process <pid> changed or is gone: not stopped'}
 ```
 
-Run it as printed. Just before stopping anything, it re-reads the process with CIM and compares the PID, CreationDate and executable path. If any of them changed, it stops nothing. Windows reuses PIDs, so never run `Stop-Process` with a remembered PID number alone. After the server ends, the launcher removes `lifecycle.json` by itself. Then run `check` to confirm the state.
+Run it as printed. Just before stopping anything, it re-reads the process with CIM and compares the PID and CreationDate. If either changed, it stops nothing. The executable path is not compared here, because CIM can spell it differently from the recorded kernel path (for example through a junction); the start time is what rules out a reused PID. Windows reuses PIDs, so never run `Stop-Process` with a remembered PID number alone. After the server ends, the launcher removes `lifecycle.json` by itself. Then run `check` to confirm the state.
 
 ### Leftover lifecycle guard
 
@@ -209,3 +209,24 @@ The user starts herdr, types the 9 sentences in Edge with the Microsoft Korean I
 The canonical 9 sentences are not in the TermWeave repository: no commit of VoidLight00/termweave contains them. Its changelog describes the earlier WebKit test as 3 sentences at 60, 25 and 12 ms per key (9/9), recorded in an unpublished note (PM-20261009-04). Provide the original as a UTF-8 file without BOM: LF line ends, exactly 9 lines. Give its SHA-256 and where it came from. The tool refuses a file whose hash differs and never ships a copy.
 
 `bun scripts/windows-native-acceptance.ts --self-test` checks the tool itself: the text comparison, the process filter, the binding, the evidence links and the result schema. Its `evidence/windows-native/self-test/result.json` has `kind: "self-test"` and `not_real_machine_evidence: true`. It is never real-machine evidence.
+
+## Windows test coverage and POSIX-only skips
+
+CI runs the same lanes (type, build, unit, render, source-style) plus `scripts/check-windows-invariants.mjs` on `ubuntu-24.04`, `macos-15` and `windows-latest`, and `scripts/windows-install.test.ps1` on Windows. A unit test is skipped on Windows only when it needs a POSIX host (tmux, `/bin/sh` or `/bin/bash` stand-ins, Unix sockets, POSIX signals or mode bits). Each skip is a single test with a reason comment; no file, folder or suite is skipped. Every skipped test still runs on ubuntu and macos.
+
+| File | Tests skipped on Windows | Reason | Other coverage |
+| --- | --- | --- | --- |
+| `server/herdr-update.test.ts` | 10 updater-run tests, plus the 202/busy/405 part of the endpoint test | `#!/bin/sh` herdr stand-in; live handoff exists off Windows only, and the product answers `unsupported` on win32 | ubuntu/macos; on Windows, "offers nothing on Windows" and "refuses an update from anything but this app's own controls" |
+| `scripts/pane-mesh-task.test.ts` | 5 CLI tests | Task ownership proves a herdr restart by the Unix socket's lstat identity; on win32 the CLI refuses with `native_server_identity_unavailable` | ubuntu/macos; on Windows, "Windows refuses task ownership without a native server identity and records nothing" |
+| `scripts/pane-mesh-roster.test.ts` | 4 "P-number hook context" tests | The hook is a `/bin/bash` script driving python3 and `#!/bin/sh` shims | ubuntu/macos |
+| `server/pane-mesh-ownership.test.ts` | "reject a group or world readable state directory"; "deleting active state requires recovery in existing and new processes" | POSIX mode bits; POSIX unlink of a file SQLite holds open (Windows refuses with EBUSY) | ubuntu/macos; on Windows, "deleting closed active state requires recovery in a new process" |
+| `server/openrig-service.test.ts`, `server/openrig/runtime.test.ts` | the 0o600 check only, split into its own test | POSIX mode bits; these files hold no secret | ubuntu/macos; the rest of each test runs on Windows |
+| `scripts/plugin.test.ts` | "returns only once the server's process group is gone" | `sh` TERM trap and Unix process groups; the herdr plugin path is not a Windows target | ubuntu/macos; owned stop on Windows: `scripts/owned-stop.test.ts`, `scripts/windows-lifecycle.test.ts` |
+| `scripts/tmux-mesh-isolation.test.ts`, `server/tmux/runtime.test.ts` | the real-tmux tests | Unix-socket tmux under `/tmp` with owner uid and 0700 checks; a Windows `tmux.exe` (psmux) is not such a host | ubuntu/macos |
+| `server/tmux/ports.test.ts` | "port metadata belongs only to the selected process tree" | `ps` and `lsof` for the Unix-socket tmux adapter | ubuntu/macos |
+
+Owner-only secret files (`voice.json`, `devices.json`, `vapid.json`, `push-subscriptions.json`) are not skipped on Windows. They are written by `server/private-file.ts` with a protected DACL that grants only the user and SYSTEM, and their tests check that DACL on Windows and mode 0o600 elsewhere.
+
+`scripts/windows-plugin.test.ts` was retired. It tested the herdr plugin path on Windows, which is not a target; the plugin manifest declares Linux and macOS only. Owned install, launch and stop on Windows are covered by `scripts/windows-lifecycle.test.ts` and `scripts/owned-stop.test.ts`. `scripts/legacy-refusal.test.ts` still checks that the plugin's phone, start and stop are refused before any subprocess or signal.
+
+Not yet on Windows: pane-mesh task ownership (needs a herdr server identity from the marker file and named pipe) and the pane directory's live herdr generation probe (`lsof`/`ps`); both fail closed rather than misidentify a server.

@@ -141,17 +141,21 @@ it("does not pin a launch session id after a new unclaimed session appears", () 
   expect(selectOmoTranscript("a", newer, [runtime("a", 10_000, [], ["old-session"]), runtime("b", 14_000, ["/new.jsonl"])], 20_000)).toBe("/old.jsonl");
 });
 
+// The agent directory is a native path: a POSIX fixture as is, on Windows the same path on a drive with backslashes.
+const native = (path: string) => process.platform === "win32" ? `C:${path.replaceAll("/", "\\")}` : path;
+
 it("finds omo's agent directory where the process's environment moved it", () => {
-  expect(omoAgentDir(null, "/home/u", "/project")).toBe("/home/u/.omo/agent"); // leakscan:allow: test fixture
-  expect(omoAgentDir(["PATH=/bin"], "/home/u", "/project")).toBe("/home/u/.omo/agent"); // leakscan:allow: test fixture
-  expect(omoAgentDir(["OMO_CODING_AGENT_DIR=/state/omo/agent"], "/home/u", "/project")).toBe("/state/omo/agent");
+  const home = native("/home/u"), cwd = native("/project");
+  expect(omoAgentDir(null, home, cwd)).toBe(native("/home/u/.omo/agent")); // leakscan:allow: test fixture
+  expect(omoAgentDir(["PATH=/bin"], home, cwd)).toBe(native("/home/u/.omo/agent")); // leakscan:allow: test fixture
+  expect(omoAgentDir([`OMO_CODING_AGENT_DIR=${native("/state/omo/agent")}`], home, cwd)).toBe(native("/state/omo/agent"));
   // the brand's own prefix first, then senpi's and pi's, as senpi reads them
-  expect(omoAgentDir(["PI_CODING_AGENT_DIR=/pi", "SENPI_CODING_AGENT_DIR=/senpi"], "/home/u", "/project")).toBe("/senpi");
-  expect(omoAgentDir(["SENPI_CODING_AGENT_DIR=/senpi", "OMO_CODING_AGENT_DIR=/omo"], "/home/u", "/project")).toBe("/omo");
-  expect(omoAgentDir(["OMO_CODING_AGENT_DIR=~/.local/state/omo"], "/home/u", "/project")).toBe("/home/u/.local/state/omo"); // leakscan:allow: test fixture
-  expect(omoAgentDir(["OMO_CODING_AGENT_DIR=rel/agent"], "/home/u", "/project")).toBe("/project/rel/agent");
+  expect(omoAgentDir([`PI_CODING_AGENT_DIR=${native("/pi")}`, `SENPI_CODING_AGENT_DIR=${native("/senpi")}`], home, cwd)).toBe(native("/senpi"));
+  expect(omoAgentDir([`SENPI_CODING_AGENT_DIR=${native("/senpi")}`, `OMO_CODING_AGENT_DIR=${native("/omo")}`], home, cwd)).toBe(native("/omo"));
+  expect(omoAgentDir(["OMO_CODING_AGENT_DIR=~/.local/state/omo"], home, cwd)).toBe(native("/home/u/.local/state/omo")); // leakscan:allow: test fixture
+  expect(omoAgentDir(["OMO_CODING_AGENT_DIR=rel/agent"], home, cwd)).toBe(native("/project/rel/agent"));
   // set but empty: senpi keeps its default and looks no further
-  expect(omoAgentDir(["OMO_CODING_AGENT_DIR=", "SENPI_CODING_AGENT_DIR=/senpi"], "/home/u", "/project")).toBe("/home/u/.omo/agent"); // leakscan:allow: test fixture
+  expect(omoAgentDir(["OMO_CODING_AGENT_DIR=", `SENPI_CODING_AGENT_DIR=${native("/senpi")}`], home, cwd)).toBe(native("/home/u/.omo/agent")); // leakscan:allow: test fixture
 });
 
 it("binds an omo pane whose launcher moved its agent directory out of ~/.omo", () => {
@@ -165,7 +169,7 @@ it("binds an omo pane whose launcher moved its agent directory out of ~/.omo", (
     const agentDir = join(root, "state", "profile", ".omo", "agent");
     mkdirSync(join(home, ".omo", "agent", "sessions"), { recursive: true });
     mkdirSync(cwd, { recursive: true });
-    const dir = join(agentDir, "sessions", `-${cwd.replaceAll("/", "-")}--`);
+    const dir = join(agentDir, "sessions", omoSessionFolder(cwd));
     const id = "01a0fd83-0000-7000-8000-000000000001";
     const pid = process.pid;
     mkdirSync(join(dir, "session-holders", id), { recursive: true });
