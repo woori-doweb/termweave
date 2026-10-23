@@ -20,10 +20,12 @@ export function canonicalIdentity(path:string):string{
 }
 /** Both arguments must already be canonical. Exact containment by separator boundary, no case folding. */
 export const isWithin=(parent:string,child:string)=>child===parent||child.startsWith(parent.endsWith(sep)?parent:parent+sep);
+/** lstat reading a missing entry as absent: ENOENT, and ENOTDIR (POSIX: a regular file on the way; Windows says ENOENT). Any other error propagates. */
+const lstatEntry=(path:string)=>{try{return lstatSync(path,{throwIfNoEntry:false});}catch(error){if((error as NodeJS.ErrnoException).code==='ENOTDIR')return undefined;throw error;}};
 /** First existing component (walking down from the filesystem root) that is a symlink or junction. Spelling aliases (case, 8.3) are not links and pass. */
 export function linkComponent(path:string):string|undefined{
  const target=resolve(path);let current=parse(target).root;
- for(const part of target.slice(current.length).split(sep).filter(Boolean)){current=join(current,part);const stat=lstatSync(current,{throwIfNoEntry:false});if(!stat)return undefined;if(stat.isSymbolicLink())return current;}
+ for(const part of target.slice(current.length).split(sep).filter(Boolean)){current=join(current,part);const stat=lstatEntry(current);if(!stat)return undefined;if(stat.isSymbolicLink())return current;}
  return undefined;
 }
 /** A new owned root must be a missing, link-free, local child of an existing directory that is not the filesystem root, the profile home or inside the source. */
@@ -31,13 +33,13 @@ export function judgeDestination(destination:string,source:string,context:PathCo
  if(isNetworkPath(destination))return {refused:'network path'};
  const target=resolve(destination);if(isNetworkPath(target))return {refused:'network path'};
  if(isFilesystemRoot(target))return {refused:'filesystem root'};
- const exists=!!lstatSync(target,{throwIfNoEntry:false});const root=canonicalIdentity(target);
+ const exists=!!lstatEntry(target);const root=canonicalIdentity(target);
  if(isNetworkPath(root))return {refused:'network path'};
  if(isFilesystemRoot(root))return {refused:'filesystem root'};
  const home=homeDirectory(context);if(home&&root===canonicalIdentity(home))return {refused:'home directory'};
  if(isWithin(canonicalIdentity(source),root))return {refused:'source repository'};
  if(exists)return {refused:'existing path'};
  if(linkComponent(target))return {refused:'symlink ancestor'};
- if(!lstatSync(dirname(target),{throwIfNoEntry:false})?.isDirectory())return {refused:'missing parent'};
+ if(!lstatEntry(dirname(target))?.isDirectory())return {refused:'missing parent'};
  return {root};
 }

@@ -30,6 +30,8 @@ it('refuses the source and anything inside it, but not a sibling sharing its nam
 it('refuses existing directories, files and dangling links, and a missing parent',()=>{
  writeFileSync(join(base,'file'),'x');
  expect(refused(dir('exists'))).toBe('existing path');expect(refused(join(base,'file'))).toBe('existing path');expect(refused(join(base,'nope','tw'))).toBe('missing parent');expect(refused(join(base,'file','tw'))).toBe('missing parent');
+ // a regular file on the way: POSIX lstat says ENOTDIR, Windows ENOENT; both are a missing parent, not a raw error
+ expect(refused(join(base,'file','deeper','tw'))).toBe('missing parent');expect(linkComponent(join(base,'file','tw'))).toBeUndefined();
  symlinkSync(join(base,'gone'),join(base,'dangling'),win?'junction':'dir');expect(existsSync(join(base,'dangling'))).toBe(false);expect(refused(join(base,'dangling'))).toBe('existing path');
 });
 it('accepts paths with spaces and Hangul as the same canonical identity',()=>{
@@ -37,6 +39,10 @@ it('accepts paths with spaces and Hangul as the same canonical identity',()=>{
 });
 test.if(!win)('POSIX: a symlinked ancestor is refused',()=>{
  symlinkSync(dir('posix-target'),join(base,'posix-link'),'dir');expect(linkComponent(join(base,'posix-link','tw'))).toBe(join(base,'posix-link'));expect(refused(join(base,'posix-link','tw'))).toBe('symlink ancestor');
+});
+// POSIX-only: ELOOP needs a self-referencing symlink, which Windows creates only with the symlink privilege; ENOENT/ENOTDIR above run on every OS
+test.if(!win)('POSIX: an lstat error other than a missing entry propagates',()=>{
+ symlinkSync('posix-loop',join(base,'posix-loop'));expect(()=>judgeDestination(join(base,'posix-loop','tw'),source)).toThrow('ELOOP');
 });
 test.if(win)('win32: drive-letter case is an alias, not an escape',()=>{
  expect(base[0]).toBe(base[0]!.toUpperCase());
@@ -56,7 +62,7 @@ test.if(win)('win32: a junction to the source is recognised as the source; a jun
  expect(linkComponent(join(base,'inside','escape','tw'))).toBe(join(base,'inside','escape'));expect(refused(join(base,'inside','escape','tw'))).toBe('symlink ancestor');
 });
 it('accepts only a protected user+SYSTEM full-control DACL',()=>{
- const user='S-1-5-21-1-2-3-1001',ok=`D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;${user})`;
+ const user='S-1-5-21-1-2-3-1001',ok=`D:PAI(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;${user})`;
  expect(isOwnedRootDacl(ok,user)).toBe(true);expect(isOwnedRootDacl(`D:P(A;OICI;FA;;;${user})(A;OICI;FA;;;S-1-5-18)`,user)).toBe(true);
  for(const bad of [`D:AI(A;OICI;FA;;;SY)(A;OICI;FA;;;${user})`,`${ok}(A;OICI;FA;;;BA)`,`D:PAI(A;OICIID;FA;;;SY)(A;OICI;FA;;;${user})`,`D:PAI(A;OICI;FA;;;SY)(A;OICI;0x1301bf;;;${user})`,`D:PAI(A;OICI;FA;;;${user})`,`D:PAI(A;OICI;FA;;;SY)(D;OICI;FA;;;${user})`,`D:PAI(A;CI;FA;;;SY)(A;OICI;FA;;;${user})`,'',`O:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;${user})`])expect([bad,isOwnedRootDacl(bad,user)]).toEqual([bad,false]);
 });
