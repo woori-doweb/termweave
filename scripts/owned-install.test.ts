@@ -20,11 +20,16 @@ test.if(win)('win32: aliases are compared as their SIDs: LA as the user, SY as S
  for(const bad of [`${ok}(A;OICI;FA;;;BA)`,`D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;${other})(A;OICI;FA;;;LA)`,`D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;QQ)`,`D:PAI(A;OICI;FA;;;QQ)(A;OICI;FA;;;LA)`,'D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'])expect([bad,isOwnedRootDacl(bad,la)]).toEqual([bad,false]);
  expect(isOwnedRootDacl(ok,other)).toBe(false);
 });
+test('a trailing SACL of mandatory-label ACEs is accepted (an elevated creator leaves one); any other SACL ACE or a broken tail is refused',()=>{
+ const user='S-1-5-21-1-2-3-500',dacl=`D:PAI(A;OICI;FA;;;S-1-5-18)(A;OICI;FA;;;${user})`;
+ expect(isOwnedRootDacl(dacl,user)).toBe(true);expect(isOwnedRootDacl(`${dacl}S:(ML;OICI;NW;;;S-1-16-12288)`,user)).toBe(true);expect(isOwnedRootDacl(`${dacl}S:AI(ML;OICIID;NW;;;S-1-16-12288)`,user)).toBe(true);
+ for(const bad of [`${dacl}S:(AU;SA;FA;;;S-1-1-0)`,`${dacl}S:(ML;OICI;NW;;;S-1-16-12288)(AU;SA;FA;;;S-1-1-0)`,`${dacl}S:`,`${dacl}X`])expect([bad,isOwnedRootDacl(bad,user)]).toEqual([bad,false]);
+});
 test.if(win)('win32: a root owned by the built-in Administrator reads back through icacls as LA and passes the check (the CI runner shape)',()=>{
  const la=trusteeSid('LA')!,root=join(base,'la-root');mkdirSync(root);
  try{
   icacls(root,'/inheritance:r','/grant:r',`*${la}:(OI)(CI)F`,'*S-1-5-18:(OI)(CI)F');
   const saved=join(base,'la-acl');icacls(root,'/save',saved);const sddl=readFileSync(saved).toString('utf16le').split(/\r?\n/)[1]!.trim();
-  expect(sddl).toContain(';;;LA)');expect(sddl).not.toContain(la);expect(isOwnedRootDacl(sddl,la)).toBe(true);expect(isOwnedRootDacl(sddl,other)).toBe(false);
+  expect(sddl).toContain(';;;LA)');expect(sddl).not.toContain(la);expect({sddl,owned:isOwnedRootDacl(sddl,la)}).toEqual({sddl,owned:true});expect(isOwnedRootDacl(sddl,other)).toBe(false);
  }finally{icacls(root,'/reset');}
 });

@@ -6,9 +6,9 @@ const system32=(exe:string)=>{const root=process.env.SystemRoot;if(!root||!isAbs
 const run=(argv:string[],cwd?:string,timeout?:number)=>Bun.spawnSync(argv,{cwd,env:buildChildEnv(process.env),stdout:'pipe',stderr:'pipe',windowsHide:true,timeout});
 /** SID of the installing account from the locale-independent SID column of `whoami /user`; a whoami that hangs is killed after 15 s and fails it. */
 export function currentUserSid():string{const result=run([system32('whoami.exe'),'/user','/fo','csv','/nh'],undefined,15_000);const sid=result.exitCode===0?/"(S-1-\d+(?:-\d+)+)"\s*$/.exec(result.stdout.toString())?.[1]:undefined;if(!sid)throw new Error('Current user SID unavailable');return sid;}
-/** SDDL DACL that is protected (no inherited ACEs) and grants exactly the user and SYSTEM (OI)(CI) full control. Every trustee is compared as its SID (`icacls /save` writes aliases such as SY, and LA when the user is the built-in Administrator); one Windows cannot resolve fails the check. */
+/** SDDL DACL that is protected (no inherited ACEs) and grants exactly the user and SYSTEM (OI)(CI) full control. A trailing SACL of mandatory-label ACEs only (an elevated creator leaves e.g. S:(ML;OICI;NW;;;HI)) is accepted: a label only restricts writes from lower integrity. Every trustee is compared as its SID (`icacls /save` writes aliases such as SY, and LA when the user is the built-in Administrator); one Windows cannot resolve fails the check. */
 export function isOwnedRootDacl(sddl:string,userSid:string):boolean{
- const [,control='',aces='']=/^D:([A-Z]*)((?:\([^()]*\))+)$/.exec(sddl.trim())??[];if(!control.includes('P'))return false;
+ const [,control='',aces='']=/^D:([A-Z]*)((?:\([^()]*\))+)(?:S:[A-Z]*(?:\(ML;[^()]*\))+)?$/.exec(sddl.trim())??[];if(!control.includes('P'))return false;
  const expected=new Set([userSid,SYSTEM_SID]);const seen=new Set<string>();
  for(const ace of aces.slice(1,-1).split(')(')){const [type,flags,rights,object,inherited,trustee,...rest]=ace.split(';');const sid=trustee?trusteeSid(trustee):undefined;if(rest.length||type!=='A'||flags!=='OICI'||rights!=='FA'||object||inherited||!sid||!expected.has(sid))return false;seen.add(sid);}
  return seen.size===expected.size;
@@ -18,7 +18,7 @@ export function restrictOwnedRoot(root:string){
  const icacls=system32('icacls.exe');const sid=currentUserSid();
  if(run([icacls,root,'/inheritance:r','/grant:r',`*${sid}:(OI)(CI)F`,`*${SYSTEM_SID}:(OI)(CI)F`]).exitCode!==0)throw new Error('Owned root ACL apply failed');
  const scratch=mkdtempSync(join(tmpdir(),'tw-acl-'));
- try{const saved=join(scratch,'acl');const sddl=run([icacls,root,'/save',saved]).exitCode===0?readFileSync(saved).toString('utf16le').split(/\r?\n/)[1]??'':'';if(!isOwnedRootDacl(sddl,sid))throw new Error('Owned root ACL verification failed');}
+ try{const saved=join(scratch,'acl');const sddl=run([icacls,root,'/save',saved]).exitCode===0?readFileSync(saved).toString('utf16le').split(/\r?\n/)[1]??'':'';if(!isOwnedRootDacl(sddl,sid))throw new Error(`Owned root ACL verification failed: expected only ${sid} and SYSTEM, read back ${JSON.stringify(sddl)}`);}
  finally{rmSync(scratch,{recursive:true,force:true});}
 }
 export function installOwned(source:string,destination:string){
