@@ -73,8 +73,10 @@ function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
 }
+/** A backslash is a glob escape on POSIX but the path separator on Windows: there it splits segments instead of being refused. */
+const EXACT_PATH = process.platform === "win32" ? { glob: /[*?\[\]{}]/, separators: /[\\/]/ } : { glob: /[*?\[\]{}\\]/, separators: /[\/]/ };
 function exactPath(path: string): void {
-  if (!text(path) || /[*?\[\]{}\\]/.test(path) || path.split(/[\/]/).includes("..")) fail("invalid_scope");
+  if (!text(path) || EXACT_PATH.glob.test(path) || path.split(EXACT_PATH.separators).includes("..")) fail("invalid_scope");
 }
 export function canonicalProject(root: string): string {
   exactPath(root);
