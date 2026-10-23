@@ -1,9 +1,10 @@
 import {afterAll,expect,test} from 'bun:test';import {mkdtempSync,mkdirSync,readFileSync,rmSync} from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';import {execFileSync} from 'node:child_process';
-import {isOwnedRootDacl} from './owned-install.ts';import {trusteeSid} from './windows-sid.ts';
+import {currentUserSid,isOwnedRootDacl,restrictOwnedRoot} from './owned-install.ts';import {trusteeSid} from './windows-sid.ts';
 const win=process.platform==='win32';
 const base=mkdtempSync(join(tmpdir(),'tw-owned-acl-'));afterAll(()=>rmSync(base,{recursive:true,force:true}));
 const icacls=(...args:string[])=>execFileSync(join(process.env.SystemRoot!,'System32','icacls.exe'),args,{stdio:'pipe',windowsHide:true,timeout:15_000});
 const other='S-1-5-21-1-2-3-1001';
+const readBack=(root:string,name:string)=>{const saved=join(base,name);icacls(root,'/save',saved);return readFileSync(saved).toString('utf16le').split(/\r?\n/)[1]!.trim();};
 test.if(win)('win32: SDDL aliases resolve through Windows, machine-relative ones included, and an unknown one resolves to nothing',()=>{
  expect(trusteeSid('SY')).toBe('S-1-5-18');expect(trusteeSid('BA')).toBe('S-1-5-32-544');expect(trusteeSid(other)).toBe(other);
  // LA is this machine's built-in Administrator (RID 500), the account GitHub's windows runner runs the job as
@@ -28,8 +29,20 @@ test('a trailing SACL of mandatory-label ACEs is accepted (an elevated creator l
 test.if(win)('win32: a root owned by the built-in Administrator reads back through icacls as LA and passes the check (the CI runner shape)',()=>{
  const la=trusteeSid('LA')!,root=join(base,'la-root');mkdirSync(root);
  try{
-  icacls(root,'/inheritance:r','/grant:r',`*${la}:(OI)(CI)F`,'*S-1-5-18:(OI)(CI)F');
-  const saved=join(base,'la-acl');icacls(root,'/save',saved);const sddl=readFileSync(saved).toString('utf16le').split(/\r?\n/)[1]!.trim();
+  restrictOwnedRoot(root,la);const sddl=readBack(root,'la-acl');
   expect(sddl).toContain(';;;LA)');expect(sddl).not.toContain(la);expect({sddl,owned:isOwnedRootDacl(sddl,la)}).toEqual({sddl,owned:true});expect(isOwnedRootDacl(sddl,other)).toBe(false);
  }finally{icacls(root,'/reset');}
+});
+// the elevated runner's shape, reproduced unelevated: explicit ACEs for other trustees on the new root before it is restricted
+const seeded=(name:string)=>{const root=join(base,name);mkdirSync(root);icacls(root,'/grant','*S-1-5-32-544:(OI)(CI)F','*S-1-1-0:(R)');const sddl=readBack(root,`${name}-seed`);expect(sddl).toContain('(A;OICI;FA;;;BA)');expect(sddl).toContain(';;;WD)');return root;};
+test.if(win)('win32: explicit Administrators and Everyone ACEs survive an icacls edit, and the check refuses the result',()=>{
+ const user=currentUserSid(),root=seeded('icacls-edit');
+ icacls(root,'/inheritance:r','/grant:r',`*${user}:(OI)(CI)F`,'*S-1-5-18:(OI)(CI)F');const sddl=readBack(root,'icacls-edit-acl');
+ expect(sddl.startsWith('D:P')).toBe(true);expect(sddl).toContain('(A;OICI;FA;;;BA)');expect(sddl).toContain(';;;WD)');expect({sddl,owned:isOwnedRootDacl(sddl,user)}).toEqual({sddl,owned:false});
+});
+test.if(win)('win32: restrictOwnedRoot replaces the whole DACL, so those explicit ACEs are gone and the read-back passes; a missing root fails the apply',()=>{
+ const user=currentUserSid(),root=seeded('replaced');
+ restrictOwnedRoot(root);const sddl=readBack(root,'replaced-acl');
+ expect(sddl).not.toContain(';;;BA)');expect(sddl).not.toContain(';;;WD)');expect(sddl).not.toContain('ID;');expect({sddl,owned:isOwnedRootDacl(sddl,user)}).toEqual({sddl,owned:true});
+ expect(()=>restrictOwnedRoot(join(base,'missing'))).toThrow('Owned root ACL apply failed: Win32 error 2');
 });

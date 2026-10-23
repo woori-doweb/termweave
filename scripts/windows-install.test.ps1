@@ -34,15 +34,38 @@ $script:Started = New-Object 'System.Collections.Generic.List[System.Diagnostics
 function Assert-True([bool]$Condition, [string]$Message) { if (-not $Condition) { throw "assertion failed: $Message" } }
 function Assert-Equal($Expected, $Actual, [string]$Message) { if (-not ([string]$Expected -ceq [string]$Actual)) { throw "assertion failed: $Message`n        expected: $Expected`n        actual:   $Actual" } }
 function Assert-Contains([string]$Text, [string]$Part, [string]$Message) { if (-not $Text.Contains($Part)) { throw "assertion failed: $Message`n        missing:  $Part`n        in:       $Text" } }
-# TW_INSTALL_TEST_FILTER (a substring of a case name) runs only the matching cases.
+# TW_INSTALL_TEST_FILTER (a substring of a case name) runs only the matching cases. After every case, passed or failed, the
+# processes it started are stopped and the install mutex must be free: no case depends on an earlier case's cleanup, and a leaked
+# holder fails the case that leaked it instead of every later one.
 function Test-Case([string]$Name, [scriptblock]$Body) {
   $filter = [Environment]::GetEnvironmentVariable('TW_INSTALL_TEST_FILTER', 'Process')
   if ($filter -and -not $Name.Contains($filter)) { return }
   $watch = [System.Diagnostics.Stopwatch]::StartNew()
-  try { & $Body; $script:Passed++; Write-Host "ok    $Name ($($watch.ElapsedMilliseconds) ms)" }
-  catch { $script:Failed++; Write-Host "FAIL  $Name ($($watch.ElapsedMilliseconds) ms)"; Write-Host "      $($_.Exception.Message)"; Write-Host "      $($_.InvocationInfo.PositionMessage)" }
+  $first = $script:Started.Count
+  $failures = @(try { $null = & $Body } catch { $_ }) + @(try { Stop-Started $first; Assert-MutexFree 'after the case stopped its processes' } catch { $_ })
+  if ($failures.Count -eq 0) { $script:Passed++; Write-Host "ok    $Name ($($watch.ElapsedMilliseconds) ms)"; return }
+  $script:Failed++; Write-Host "FAIL  $Name ($($watch.ElapsedMilliseconds) ms)"
+  foreach ($failure in $failures) { Write-Host "      $($failure.Exception.Message)"; Write-Host "      $($failure.InvocationInfo.PositionMessage)" }
 }
-function Wait-Until([string]$What, [scriptblock]$Condition, [int]$TimeoutMs = 30000) {
+# Kills (and reaps) a test child that is still running.
+function Stop-Run([System.Diagnostics.Process]$Process) {
+  if (-not $Process.HasExited) { try { $Process.Kill() } catch { if (-not $Process.HasExited) { throw } } }
+  if (-not $Process.WaitForExit(60000)) { throw "process $($Process.Id) did not exit within 60 s of being killed" }
+}
+function Stop-Started([int]$From) { for ($i = $From; $i -lt $script:Started.Count; $i++) { Stop-Run $script:Started[$i] } }
+# The install mutex is free right now: acquired without waiting (an abandoned one counts, its owner is gone) and released again.
+# Still held means a leaked holder or install.ps1 run, which would make every later changing call wait and fail.
+function Assert-MutexFree([string]$When) {
+  $mutex = New-Object System.Threading.Mutex($false, $MutexName)
+  try {
+    $free = try { $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $true }
+    if (-not $free) { throw "the install mutex $MutexName is still held $When" }
+    $mutex.ReleaseMutex()
+  } finally { $mutex.Dispose() }
+}
+# Bound for a child to get going (powershell.exe startup alone took minutes on a loaded runner); waits end when the signal appears.
+$StartupMs = 180000
+function Wait-Until([string]$What, [scriptblock]$Condition, [int]$TimeoutMs) {
   $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
   while (-not (& $Condition)) { if ([DateTime]::UtcNow -ge $deadline) { throw "timed out waiting for $What" }; Start-Sleep -Milliseconds 100 }
 }
@@ -80,9 +103,13 @@ function Complete-PowerShell($Run, [int]$TimeoutMs = 120000) {
   return [pscustomobject]@{ Code = $Run.Process.ExitCode; Out = $Run.Out.Result; Err = $Run.Err.Result; Ms = $Run.Watch.ElapsedMilliseconds; Records = @(Read-Records $Run.Record) }
 }
 function Invoke-Installer([string[]]$Arguments, [hashtable]$Vars, [string]$Script = $FixtureInstaller) { Complete-PowerShell (Start-PowerShell (@('-File', $Script) + $Arguments) $Vars) }
+# The complete (newline-terminated) JSON lines of $File. Shared with writers that still have it open (the stand-in TS appends one
+# whole line per record): ReadAllLines' FileShare.Read fails against an open writer, and a line still being written is not taken.
 function Read-Records([string]$File) {
   if (-not $File -or -not [IO.File]::Exists($File)) { return @() }
-  return @([IO.File]::ReadAllLines($File) | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
+  $stream = New-Object IO.FileStream($File, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+  try { $text = (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+  return @($text.Substring(0, $text.LastIndexOf("`n") + 1).Split("`n") | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
 }
 function Get-Argv($Record) { return (@($Record.argv) -join '|') }
 
@@ -143,7 +170,7 @@ function New-Vars([hashtable]$Vars = @{}) {
   foreach ($name in $Vars.Keys) { $all[$name] = $Vars[$name] }
   return $all
 }
-function Read-InstallerLog { if ([IO.File]::Exists($InstallerLog)) { return @([IO.File]::ReadAllLines($InstallerLog) | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json }) }; return @() }
+function Read-InstallerLog { return @(Read-Records $InstallerLog) }
 function Clear-InstallerLog { if ([IO.File]::Exists($InstallerLog)) { [IO.File]::Delete($InstallerLog) } }
 $HolderScript = Join-Path $Base 'holder.ps1'
 [IO.File]::WriteAllText($HolderScript, @'
@@ -157,17 +184,20 @@ Start-Sleep -Milliseconds $HoldMs
 if ($Mode -eq 'release') { $mutex.ReleaseMutex() }
 exit 0
 '@)
-# Another holder of the install mutex (a running install.ps1). Abandon mode exits while holding it.
+# Another holder of the install mutex (a running install.ps1). Abandon mode exits while holding it. A holder that does not get
+# ready (or exits) is stopped before the throw, so it cannot take the mutex later and hold it into the next cases.
 function Start-Holder([int]$HoldMs, [string]$Mode = 'release') {
   $ready = Join-Path $Markers ('holder-' + [guid]::NewGuid().ToString('N') + '.ready')
-  $run = Start-PowerShell @('-File', $HolderScript, '-Name', $MutexName, '-HoldMs', [string]$HoldMs, '-Mode', $Mode, '-Ready', $ready) (New-Vars)
-  Wait-Until 'the mutex holder' { [IO.File]::Exists($ready) -or $run.Process.HasExited }
-  if ($run.Process.HasExited) { throw "holder exited early: $($run.Err.Result)" }
-  return [pscustomobject]@{ Run = $run; Released = "$ready.released" }
+  $holder = [pscustomobject]@{ Run = (Start-PowerShell @('-File', $HolderScript, '-Name', $MutexName, '-HoldMs', [string]$HoldMs, '-Mode', $Mode, '-Ready', $ready) (New-Vars)); Released = "$ready.released" }
+  try {
+    Wait-Until 'the mutex holder to signal ready' { [IO.File]::Exists($ready) -or $holder.Run.Process.HasExited } $StartupMs
+    if ($holder.Run.Process.HasExited) { throw "holder exited early: $($holder.Run.Err.Result)" }
+  } catch { $failure = $_; try { Stop-Holder $holder } catch { throw "$($failure.Exception.Message); $($_.Exception.Message)" }; throw $failure }
+  return $holder
 }
 # Still holding: the holder neither ended nor reached its release.
 function Test-Held($Holder) { -not $Holder.Run.Process.HasExited -and -not [IO.File]::Exists($Holder.Released) }
-function Stop-Holder($Holder) { if (-not $Holder.Run.Process.HasExited) { $Holder.Run.Process.Kill() }; $null = $Holder.Run.Process.WaitForExit(10000) }
+function Stop-Holder($Holder) { Stop-Run $Holder.Run.Process; Assert-MutexFree 'after its holder was stopped' }
 # Every file (with its size) and directory under $Roots, marked `written` when its write time is at or after $Since: a directory
 # counts as written when an entry was created or deleted in it, even if that entry is gone again. Plus HKCU\Environment.
 # Writes of powershell.exe itself are left out: its startup cache under LOCALAPPDATA and the policy probe file it creates and
@@ -329,7 +359,7 @@ try {
 
   Test-Case 'changing calls are serialized by the per-user Global mutex' {
     $first = Start-PowerShell @('-File', $FixtureInstaller, '--no-start') (New-Vars @{ TW_TEST_HOLD_INSTALL = '3000' })
-    Wait-Until 'the first install to reach TS' { @(Read-Records $first.Record).Count -gt 0 -or $first.Process.HasExited }
+    Wait-Until 'the first install to reach TS' { @(Read-Records $first.Record).Count -gt 0 -or $first.Process.HasExited } $StartupMs
     $second = Invoke-Installer @('--no-start') (New-Vars)
     $firstResult = Complete-PowerShell $first
     Assert-Equal 0 $firstResult.Code "first run: $($firstResult.Err)"
