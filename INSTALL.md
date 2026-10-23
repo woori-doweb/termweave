@@ -1,8 +1,105 @@
 # TermWeave installation
 
-Use the reviewed local source instructions in [README](./README.md) and CONTRIBUTING. No curl|sh installer, automatic prerequisite upgrade, public exposure or upstream plugin replacement is supported. External access needs explicit opt-in and authentication. Windows and runtime bundle distribution remain unsupported.
+Use the reviewed local source instructions in [README](./README.md) and CONTRIBUTING. No curl|sh installer, automatic prerequisite upgrade, public exposure or upstream plugin replacement is supported. External access needs explicit opt-in and authentication. Runtime bundle distribution remains unsupported.
+
+Every platform installs from a clean git clone into an owned directory and starts the same server on `127.0.0.1`. The front end differs:
+
+| Platform | Front end | Needs |
+| --- | --- | --- |
+| macOS, Linux | `sh scripts/install.sh` | git, Bun 1.4+, Node 18+ (terminal sidecar), herdr 0.9.0+ |
+| Windows 10 1809+ / 11 (native, no WSL) | `powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1` | git, Bun 1.4+, herdr 0.9.0+. Node is not needed and not checked. |
+
+Both front ends use exit code 0 for ok, 2 for a missing prerequisite and 1 for any other failure. Both call `scripts/install-lifecycle.ts` (see [Starting and stopping an owned install](#starting-and-stopping-an-owned-install)).
+
+## macOS and Linux: scripts/install.sh
+
+```
+sh scripts/install.sh [--check] [--yes] [--no-start] [--dir PATH] [--port N]
+```
+
+- The default directory is `~/.local/share/termweave-owned`. `TERMWEAVE_INSTALL_DIR` changes it, and `--dir` takes precedence over both.
+- The default port is 7317. `PORT` changes it, and `--port` takes precedence over both.
+- `--check` changes nothing. `--yes` allows the official installers: `curl -fsSL https://bun.sh/install | bash` and `curl -fsSL https://herdr.dev/install.sh | sh`.
+- Node 18+ is required here, for the terminal sidecar. Install it yourself from nodejs.org, nvm or Homebrew. `--yes` does not install Node.
+- Stop the server with the command the installer prints: `(cd "$DIR" && bun scripts/install-lifecycle.ts stop --dir "$DIR")`.
+
+## Windows: install.ps1
+
+Run `install.ps1` as a file from a clean clone of TermWeave. It is not an `irm | iex` script. It needs no administrator rights and never elevates itself. `-ExecutionPolicy Bypass` applies only to this one PowerShell process.
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 [--check] [--yes] [--no-start] [--stop] [--dir PATH] [--port N]
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--check` | Verify prerequisites, install and health. Changes nothing. Every other option except `--dir`/`--port` is ignored, `--yes` included. |
+| `--yes` | Allow the official Bun and herdr installers when they are missing. |
+| `--no-start` | Install and build, but do not start the server. |
+| `--stop` | Stop the installed server. It uses the recorded port; an explicit `--port` must match it. |
+| `--dir PATH` | Install directory. Default: `$env:TERMWEAVE_INSTALL_DIR`, else `%LOCALAPPDATA%\termweave-owned`. |
+| `--port N` | Local port for a new start. Default: `$env:PORT`, else 7317. A running instance keeps its recorded port. |
+
+### Bun only, and the herdr you start
+
+- TermWeave on Windows runs on Bun alone. It needs no Node and no WSL. git is still needed, because the installer copies committed files from the clone.
+- Start herdr yourself, in a terminal of your choice (`herdr`). `install.ps1` never starts or stops herdr.
+- If herdr is not running, the server still starts and keeps running. The start reports `herdr is not ready` and exits 1. Start herdr, then run `--check`.
+- With `--yes`, missing Bun and herdr are installed with their official installers: `irm https://bun.sh/install.ps1 | iex` and `irm https://herdr.dev/install.ps1 | iex`. Each installer runs in its own `powershell.exe -NoProfile` with TLS 1.2 enabled. A failed installer makes `install.ps1` exit 1 and prints the cause (download, proxy, TLS or policy) with the command to run by hand.
+- `install.ps1` re-reads the Machine and User `Path` from the registry, read only, after an installer runs. You do not need a new terminal.
+- Without `--yes`, a missing Bun ends `--check` and every other mode with exit 2 and the fix command.
+
+### Check: exit 0, 1 or 2
+
+`powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 --check` writes nothing: no download, mutex, lock, log, file or registry write.
+
+- **0**: this install's own server is running (process identity and bridge `boot_id` match) and the full `/api/health`, herdr included, is ok.
+- **1**: not installed, not running, another server owns the port, or herdr is not ready.
+- **2**: a prerequisite is missing (git, Bun 1.4+ or herdr 0.9.0+).
+
+### Install directory, port and stop
+
+- An existing install in `--dir` is reused, not rebuilt. To run a newer commit, install into a new `--dir`. A path that exists but is not a TermWeave install is refused.
+- A new start uses `--port`, else `PORT`, else 7317. The running instance records its port in `<dir>\lifecycle.json`, and that record wins from then on:
+  - `--stop` and `--check` use the recorded port, whatever `PORT` says.
+  - `--stop --port N` with another port fails and sends nothing.
+  - Starting again with another `--port` while it runs fails with "stop it first".
+- Stop with `powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 --stop [--dir PATH]`. It stops the server gracefully and leaves herdr and Edge running. See [Starting and stopping an owned install](#starting-and-stopping-an-owned-install) for what it checks and what a failure prints.
+- Changing runs (install, start, stop) of one Windows user are serialized by a per-user mutex. A second run waits up to 15 minutes, then fails. `--check` never takes the mutex.
+
+### The server outlives the console
+
+The server runs in the background, detached from the console and hidden. It is meant to keep running after you close the PowerShell window that ran `install.ps1`, until you run `--stop`.
+
+- Automated tests show that it outlives the process that launched it.
+- Closing a real console window is checked on a real machine (M10, below).
+- Its output goes to `<dir>\server.log`.
+- It does not start by itself after you sign out or restart Windows. Run `install.ps1` again.
+
+### Edge app window or PWA
+
+- Open TermWeave as an Edge app window: `msedge --app=http://127.0.0.1:7317`. Use the recorded port if it is not 7317. If `msedge` is not on `Path`, use `"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"`.
+- Or install it as a PWA. Open the URL in Edge, then choose Apps > Install this site as an app.
+- TermWeave does not create shortcuts.
+
+### Supported Windows versions and architectures
+
+- Windows 10 1809 or later and ARM64 are intended to be supported.
+- Support is judged statically only. `install.ps1`, the lifecycle scripts (`scripts/install-lifecycle.ts`, `lifecycle-*.ts`, `process-identity.ts`, `owned-*.ts`) and the executable lookup contain no architecture checks, x64-only paths or x64-only binaries.
+- Windows 10 1809 and ARM64 were not verified on real hardware. Whether Bun, herdr and Edge work together there is an open risk.
+
+### Native window (deferred)
+
+TermWeave has no native Windows window (WebView2/Tauri/Electron); the Edge app window or PWA is the supported path. A native window is reconsidered only if:
+
+- Edge app key interception becomes a real problem, or
+- Korean input fails in Edge.
+
+A Tauri window would then need tao 0.36 or later, or a vendored patch: tao 0.35 deadlocks on Korean IME re-entry (Mymux `.issue/36`, CHANGELOG v0.2.1).
 
 ## Starting and stopping an owned install
+
+`install.ps1` and `install.sh` run these commands for you; on Windows `install.ps1 --stop` is the stop front end. You can run them directly from the clone:
 
 ```
 bun scripts/install-lifecycle.ts start --dir PATH [--port N]
@@ -60,3 +157,55 @@ The guard is never removed automatically: no age, TTL, `--force` or "owner is go
 4. Leave the work lock (`.termweave-<digest>.lock`) and `lifecycle.json` in place. The next normal command judges them again.
 
 If you cannot confirm that nothing runs for this install, do not delete the guard. Afterwards, run `check`.
+
+## Real-machine evidence on Windows (M10)
+
+Some checks only a real Windows machine can make: the Edge app window, Korean input through the Microsoft IME, and `--stop` ending every owned process. Their before and after evidence is kept as UTF-8 text in `evidence/windows-native/<run-id>/`, written by `scripts/windows-native-acceptance.ts`:
+
+| File | Content |
+| --- | --- |
+| `environment.txt` | candidate `git rev-parse HEAD`, `marker.source_sha`, install dir, OS/build/architecture, Windows PowerShell, Bun, herdr and Edge versions, recorded port and `boot_id`, commands run |
+| `edge.before.txt`, `edge.after.txt` | app or PWA, URL and launch command, health, the checks and who confirmed them when (Needs-you by the user) |
+| `ime.before.txt` | the original 9 sentences, their source and SHA-256, the test-owned pane, the IME condition |
+| `ime.after.txt`, `ime.pane-read.json` | the raw `pane.read` answer, the extraction rule, per sentence the length and the first mismatching index and code point, and the n/9 result |
+| `stop.before.txt`, `stop.after.txt` | owned launcher/server processes (PID, parent, CreationDate, executable, command line with secrets removed), N before and after, the filter rule, the stop exit code, `lifecycle.json`, the listener, herdr and Edge kept alive |
+| `commands.txt`, `result.json` | every command with its exit code and output; per AC pass/fail/blocked/not-run, who confirmed it, file SHA-256s, CI run and pushed SHA, the 3G-C decision |
+
+Rules the tool enforces:
+
+- Each run installs into a new `--dir`. `init` refuses an existing directory.
+- The install must be the candidate. `environment` checks that `marker.source_sha`, the HEAD recorded at `init` and the current HEAD are the same commit, that `marker.root` is the run's directory, and that the marker is newer than `init`.
+- Collection is read only. Only `exec`, `pane`, `ime-before` and `pane-close` change anything, and only when you run them. They touch only the one herdr workspace the run created; your own panes are never written to.
+- Evidence files are written once. A failed run is kept; start a new run id instead of repeating a step.
+- A process query that is denied or fails is reported as blocked, never as 0 processes. Processes are matched by the exact owned script path in the command line (`<dir>\scripts\owned-server.ts start`, `<dir>\server\index.ts`) and by parent and start time. A string prefix is never enough.
+- The IME comparison is code point by code point, spaces included. Nothing is trimmed or Unicode-normalized.
+- Tokens, API keys and the stop token in `lifecycle.json` are never collected. Pane content is read only from the test-owned pane.
+
+A run, in order:
+
+```
+bun scripts/windows-native-acceptance.ts init --run RUN --dir NEW_DIR
+bun scripts/windows-native-acceptance.ts exec --run RUN -- powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 --dir NEW_DIR
+bun scripts/windows-native-acceptance.ts environment --run RUN
+bun scripts/windows-native-acceptance.ts pane --run RUN
+bun scripts/windows-native-acceptance.ts edge-before --run RUN --mode app
+bun scripts/windows-native-acceptance.ts ime-before --run RUN --sentences FILE --sha256 HEX --source TEXT --ime TEXT
+bun scripts/windows-native-acceptance.ts ime-after --run RUN
+bun scripts/windows-native-acceptance.ts edge-after --run RUN --by user --verdict AC-B5=pass ...
+bun scripts/windows-native-acceptance.ts stop-before --run RUN
+bun scripts/windows-native-acceptance.ts exec --run RUN -- powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 --stop --dir NEW_DIR
+bun scripts/windows-native-acceptance.ts stop-after --run RUN
+bun scripts/windows-native-acceptance.ts finish --run RUN --ci-run URL --push-sha SHA --g3c not-triggered
+```
+
+Run `pane-close` once the Edge and IME checks are done. Record other ACs with `verdict`. `status` prints the AC table and checks the evidence links. `result.json` reports `real_machine_pass: true` only when:
+
+- the binding holds;
+- every real-machine AC passed;
+- the CI run's pushed SHA is the candidate.
+
+The user starts herdr, types the 9 sentences in Edge with the Microsoft Korean IME at normal speed, and confirms Needs-you. Automatic typing or key-interval timing does not replace this.
+
+The canonical 9 sentences are not in the TermWeave repository: no commit of VoidLight00/termweave contains them. Its changelog describes the earlier WebKit test as 3 sentences at 60, 25 and 12 ms per key (9/9), recorded in an unpublished note (PM-20261009-04). Provide the original as a UTF-8 file without BOM: LF line ends, exactly 9 lines. Give its SHA-256 and where it came from. The tool refuses a file whose hash differs and never ships a copy.
+
+`bun scripts/windows-native-acceptance.ts --self-test` checks the tool itself: the text comparison, the process filter, the binding, the evidence links and the result schema. Its `evidence/windows-native/self-test/result.json` has `kind: "self-test"` and `not_real_machine_evidence: true`. It is never real-machine evidence.
