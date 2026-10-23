@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 
 const script = join(import.meta.dir, "hooks", "pane-mesh-roster.sh");
 const jq = Bun.which("jq");
-// the hook is a /bin/bash script driving python3 and #!/bin/sh herdr shims: needs a POSIX host; covered by CI ubuntu/macos
+// the hook is a /bin/bash script driving python3, jq and #!/bin/sh herdr shims: needs a POSIX host, not just jq (a Windows runner has jq but no /bin/bash); covered by CI ubuntu/macos
 const posixHost = process.platform !== "win32";
 let shim: string;
 beforeAll(() => { shim = mkdtempSync(join(tmpdir(), "pane-mesh-roster-")); });
@@ -87,7 +87,7 @@ describe("P-number hook context", () => {
   });
 });
 
-describe.skipIf(!jq)("pane-mesh-roster.sh", () => {
+describe.skipIf(!posixHost || !jq)("pane-mesh-roster.sh", () => {
   it("lists the panes beside the agent, by label when there is one", () => {
     fakeHerdr(list([
       pane("w1:p1", { label: "pane 1", agent: "claude", agent_status: "idle", cwd: "/work/api" }),

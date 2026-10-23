@@ -165,6 +165,8 @@ function Start-Holder([int]$HoldMs, [string]$Mode = 'release') {
   if ($run.Process.HasExited) { throw "holder exited early: $($run.Err.Result)" }
   return [pscustomobject]@{ Run = $run; Released = "$ready.released" }
 }
+# Still holding: the holder neither ended nor reached its release.
+function Test-Held($Holder) { -not $Holder.Run.Process.HasExited -and -not [IO.File]::Exists($Holder.Released) }
 function Stop-Holder($Holder) { if (-not $Holder.Run.Process.HasExited) { $Holder.Run.Process.Kill() }; $null = $Holder.Run.Process.WaitForExit(10000) }
 # Every file (with its size) and directory under $Roots, marked `written` when its write time is at or after $Since: a directory
 # counts as written when an entry was created or deleted in it, even if that entry is gone again. Plus HKCU\Environment.
@@ -300,7 +302,9 @@ try {
     $roots = @($HomeDir, $Temp, $Work, $Src, $parent)
     # Bun's runtime transpiler cache (under USERPROFILE\.bun) is Bun's own, not a lifecycle write: off for this case.
     $toolVars = @{ Path = "$SystemPath;$BunDir;$GitDir;$(Join-Path $Tools 'herdr')"; BUN_RUNTIME_TRANSPILER_CACHE_PATH = '0' }
-    $holder = Start-Holder 120000
+    # Held far longer than any startup (and than the 30 s test wait budget): a check that waited for the mutex could only run TS
+    # after the release, or fail without TS; one that finishes TS while the mutex is still held never waited, however slow the host.
+    $holder = Start-Holder 900000
     try {
       Start-Sleep -Milliseconds 200
       $since = [DateTime]::UtcNow.Ticks
@@ -308,14 +312,14 @@ try {
       $stand = Invoke-Installer @('--check', '--yes', '--dir', $owned) (New-Vars @{ TW_TEST_EXIT_CHECK = '1'; BUN_RUNTIME_TRANSPILER_CACHE_PATH = '0' })
       Assert-Equal 1 $stand.Code 'stand-in check exit code'
       Assert-Equal "check|--dir|$owned" (Get-Argv $stand.Records[0]) 'stand-in argv'
-      Assert-True ($stand.Ms -lt 20000 -and -not $stand.Err.Contains('wait  ')) "check must not wait for the held mutex ($($stand.Ms) ms)"
+      Assert-True ((Test-Held $holder) -and -not $stand.Err.Contains('wait  ')) "check must finish while the mutex is held, without waiting for it ($($stand.Ms) ms)"
       # The real install.ps1 and scripts/install-lifecycle.ts: git, bun and a herdr stand-in on Path; installed, nothing running.
       $port = Get-FreePort
       $real = Invoke-Installer @('--check', '--dir', $owned, '--port', [string]$port) (New-Vars $toolVars) $Installer
       Assert-Equal 1 $real.Code "real check exit code; out: $($real.Out) err: $($real.Err)"
       Assert-Contains $real.Out "ok    installed at $owned" 'real check judged the install'
       Assert-Contains $real.Err "MISS  no server answers http://127.0.0.1:$port/api/health" 'real check probed the given port'
-      Assert-True ($real.Ms -lt 60000 -and -not $real.Err.Contains('wait  ')) 'real check must not wait for the held mutex'
+      Assert-True ((Test-Held $holder) -and -not $real.Err.Contains('wait  ')) "real check must finish while the mutex is held, without waiting for it ($($real.Ms) ms)"
       $absent = Invoke-Installer @('--check', '--dir', (Join-Path $parent 'never\created')) (New-Vars $toolVars) $Installer
       Assert-Equal 1 $absent.Code 'real check of a missing install'
       $after = Get-Snapshot $roots $since

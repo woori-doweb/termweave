@@ -267,6 +267,7 @@ async function inputPolicyRegression(negative: boolean): Promise<void> {
 
       // xterm's own answers: the queries in the screen, a blur+focus, a middle click
       let from = await frameCount(page);
+      const pastesFrom = await page.evaluate(() => (window as any).policy.pastes.length as number);
       await emit(page, { type: 'pty-data', pane_id: INPUT_POLICY_PANE, data: INPUT_POLICY_QUERIES });
       await until(page, () => { const modes = (window as any).policy.terms[0].modes; return modes.sendFocusMode && modes.bracketedPasteMode && modes.mouseTrackingMode === 'vt200'; }, `${mode} query modes`);
       await page.evaluate(() => { const node = document.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea')!; node.blur(); node.focus(); });
@@ -275,7 +276,12 @@ async function inputPolicyRegression(negative: boolean): Promise<void> {
       await page.mouse.click(screen.x + 40, screen.y + 30, { button: 'middle' });
       await Bun.sleep(300);
       const replies = await sentSince(page, from);
-      if (mode === 'mirror') check('mirror-replies-dropped', 'mirror-filter', replies === '', { sent: replies });
+      // Linux only: Chromium pastes the PRIMARY selection (empty here) on a middle click, xterm moving its textarea under the
+      // pointer for it. That paste is the user's and passes in both modes, bracketed (2004 is on): it is the only input allowed.
+      const pastes = await page.evaluate(start => (window as any).policy.pastes.slice(start) as { trusted: boolean; text: string }[], pastesFrom);
+      const gesture = pastes.map(paste => `\x1b[200~${paste.text.replace(/\r?\n/g, '\r')}\x1b[201~`).join('');
+      const gestureOk = pastes.every(paste => paste.trusted) && (process.platform === 'linux' ? pastes.length <= 1 : pastes.length === 0);
+      if (mode === 'mirror') check('mirror-replies-dropped', 'mirror-filter', gestureOk && replies === gesture, { sent: replies, pastes });
       else {
         const missing = INPUT_POLICY_REPLIES.filter(reply => !reply.test(replies)).map(String);
         check('attach-replies-kept', null, missing.length === 0, { sent: replies, missing });
@@ -378,7 +384,7 @@ async function compositionGuard(page: Page, cdp: CDPSession, check: InputPolicyC
 /** Runs in the page before its scripts: a mock WebSocket transport and focus/blur/composition probes. */
 function inputPolicyInit({ pane, mirror }: { pane: string; mirror: boolean }): void {
   localStorage.setItem('termweave:direct-typing', '1');
-  const policy: any = { frames: [], sockets: [], terms: [], resets: 0, autoSelected: [], calls: { focus: 0, blur: 0, synthetic: 0 }, compositionEnds: 0 };
+  const policy: any = { frames: [], sockets: [], terms: [], resets: 0, autoSelected: [], calls: { focus: 0, blur: 0, synthetic: 0 }, compositionEnds: 0, pastes: [] };
   (window as any).policy = policy;
   for (const name of ['focus', 'blur'] as const) {
     const original = HTMLElement.prototype[name];
@@ -389,6 +395,7 @@ function inputPolicyInit({ pane, mirror }: { pane: string; mirror: boolean }): v
   }
   document.addEventListener('focus', event => { if (!event.isTrusted && (event.target as Element)?.classList?.contains('xterm-helper-textarea')) policy.calls.synthetic++; }, true);
   document.addEventListener('compositionend', () => { policy.compositionEnds++; }, true);
+  document.addEventListener('paste', event => { policy.pastes.push({ trusted: event.isTrusted, text: event.clipboardData?.getData('text/plain') ?? '' }); }, true);
   class MockSocket extends EventTarget {
     static OPEN = 1; static CONNECTING = 0; readyState = 0;
     constructor(public url: string) {
