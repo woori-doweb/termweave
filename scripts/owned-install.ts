@@ -1,16 +1,16 @@
 import {cpSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,writeFileSync,lstatSync,readlinkSync,rmdirSync,rmSync} from 'node:fs';import {resolve,join,isAbsolute} from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';import {execFileSync} from 'node:child_process';
-import {installationSources} from './install-source.ts';import {canonicalPath,judgeDestination} from './lifecycle-path.ts';import {buildChildEnv} from './lifecycle-env.ts';
+import {installationSources} from './install-source.ts';import {canonicalPath,judgeDestination} from './lifecycle-path.ts';import {buildChildEnv} from './lifecycle-env.ts';import {trusteeSid} from './windows-sid.ts';
 const SYSTEM_SID='S-1-5-18';
 const system32=(exe:string)=>{const root=process.env.SystemRoot;if(!root||!isAbsolute(root))throw new Error('SystemRoot is required for the owned root ACL');return join(root,'System32',exe);};
 /** Every child inherits the denylist-filtered environment (lifecycle-env.ts), never the raw parent with its API keys. */
-const run=(argv:string[],cwd?:string)=>Bun.spawnSync(argv,{cwd,env:buildChildEnv(process.env),stdout:'pipe',stderr:'pipe',windowsHide:true});
-/** SID of the installing account from the locale-independent SID column of `whoami /user`. */
-export function currentUserSid():string{const result=run([system32('whoami.exe'),'/user','/fo','csv','/nh']);const sid=result.exitCode===0?/"(S-1-\d+(?:-\d+)+)"\s*$/.exec(result.stdout.toString())?.[1]:undefined;if(!sid)throw new Error('Current user SID unavailable');return sid;}
-/** SDDL DACL that is protected (no inherited ACEs) and grants exactly the user and SYSTEM (OI)(CI) full control. */
+const run=(argv:string[],cwd?:string,timeout?:number)=>Bun.spawnSync(argv,{cwd,env:buildChildEnv(process.env),stdout:'pipe',stderr:'pipe',windowsHide:true,timeout});
+/** SID of the installing account from the locale-independent SID column of `whoami /user`; a whoami that hangs is killed after 15 s and fails it. */
+export function currentUserSid():string{const result=run([system32('whoami.exe'),'/user','/fo','csv','/nh'],undefined,15_000);const sid=result.exitCode===0?/"(S-1-\d+(?:-\d+)+)"\s*$/.exec(result.stdout.toString())?.[1]:undefined;if(!sid)throw new Error('Current user SID unavailable');return sid;}
+/** SDDL DACL that is protected (no inherited ACEs) and grants exactly the user and SYSTEM (OI)(CI) full control. Every trustee is compared as its SID (`icacls /save` writes aliases such as SY, and LA when the user is the built-in Administrator); one Windows cannot resolve fails the check. */
 export function isOwnedRootDacl(sddl:string,userSid:string):boolean{
  const [,control='',aces='']=/^D:([A-Z]*)((?:\([^()]*\))+)$/.exec(sddl.trim())??[];if(!control.includes('P'))return false;
  const expected=new Set([userSid,SYSTEM_SID]);const seen=new Set<string>();
- for(const ace of aces.slice(1,-1).split(')(')){const [type,flags,rights,object,inherited,trustee,...rest]=ace.split(';');const sid=trustee==='SY'?SYSTEM_SID:trustee;if(rest.length||type!=='A'||flags!=='OICI'||rights!=='FA'||object||inherited||!sid||!expected.has(sid))return false;seen.add(sid);}
+ for(const ace of aces.slice(1,-1).split(')(')){const [type,flags,rights,object,inherited,trustee,...rest]=ace.split(';');const sid=trustee?trusteeSid(trustee):undefined;if(rest.length||type!=='A'||flags!=='OICI'||rights!=='FA'||object||inherited||!sid||!expected.has(sid))return false;seen.add(sid);}
  return seen.size===expected.size;
 }
 /** Windows: one icacls pass right after root creation, before any file is written. Removes inheritance, grants (OI)(CI)F to the current user SID and SYSTEM only, then reads the DACL back with `icacls /save`. Any failure fails the install. */
