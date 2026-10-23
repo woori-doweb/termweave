@@ -34,6 +34,7 @@ import { imeEdit, imeSpaces } from "../lib/imeDiff.ts";
 import {
   COMPOSITION_IDLE, COMPOSITION_SETTLE_MS, MIRROR_INPUT_IDLE, compositionSettled, filterMirrorInput, flushMirrorInput, type CompositionPhase,
 } from "../lib/mirrorInputPolicy.ts";
+import { MirrorCompositionBuffer } from "../lib/mirrorCompositionBuffer.ts";
 import { loadFontStack, TERMINAL_FONT_STACK, terminalFontStack } from "../lib/fontFamily.ts";
 import { useT } from "../lib/i18n.ts";
 import { isAppShortcut } from "../lib/shortcuts.ts";
@@ -170,18 +171,43 @@ export function PaneTerminal({
   const settleTimerRef = useRef<number | null>(null);
   const settledActionsRef = useRef(new Map<string, () => void>());
   const imeSettled = (): boolean => compositionSettled(compositionRef.current, performance.now());
+  // A mirror's frames inside that span (mirrorCompositionBuffer.ts): taken in and acknowledged as they
+  // come, never written there; the latest screen they make is written once, at the first animation
+  // frame after the span settles. One held screen per pane, connection and output stream.
+  const heldScreenRef = useRef<MirrorCompositionBuffer | null>(null);
+  const heldFrameRef = useRef<number | null>(null);
+  /** writes the held screen (set by the mount, which owns the terminal) */
+  const writeHeldRef = useRef<() => void>(() => {});
+  /** the held screen is no longer this terminal's (a pane change, a disconnect, a reset, an unmount) */
+  const dropHeldScreen = useCallback(() => {
+    if (heldFrameRef.current !== null) window.cancelAnimationFrame(heldFrameRef.current);
+    heldFrameRef.current = null;
+    heldScreenRef.current = null;
+  }, []);
   /** end the span now: `run` its waiting recoveries, or drop them (a pane change, an unmount) */
   const settleComposition = useCallback((run: boolean) => {
     if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
     settleTimerRef.current = null;
     compositionRef.current = COMPOSITION_IDLE;
+    if (!run) dropHeldScreen();
+    else if (heldScreenRef.current !== null && heldFrameRef.current === null) {
+      heldFrameRef.current = window.requestAnimationFrame(() => {
+        heldFrameRef.current = null;
+        writeHeldRef.current();
+      });
+    }
     const actions = [...settledActionsRef.current.values()];
     settledActionsRef.current.clear();
     if (run) for (const action of actions) action();
-  }, []);
+  }, [dropHeldScreen]);
   const setComposing = useCallback((active: boolean) => {
     composingRef.current = active;
     setComposingState(active);
+    // composing again before the held screen was written: it waits for this span too
+    if (active && heldFrameRef.current !== null) {
+      window.cancelAnimationFrame(heldFrameRef.current);
+      heldFrameRef.current = null;
+    }
     if (active === compositionRef.current.composing) return;
     if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
     settleTimerRef.current = null;
@@ -734,32 +760,58 @@ export function PaneTerminal({
     socket.setMode(role);
     term.options.disableStdin = role === "observe";
     let outputGeneration = 0;
+    /** what follows a write of the pane's output into the grid */
+    const wrote = (owner: string, generation: number): void => {
+      if (paneRef.current !== owner || generation !== outputGeneration) return;
+      setOutputReady(true);
+      followCursor();
+      const lines: string[] = [];
+      const buffer = term.buffer.active;
+      for (let row = 0; row < buffer.length; row++) {
+        const line = buffer.getLine(row);
+        const text = line?.translateToString(!buffer.getLine(row + 1)?.isWrapped) ?? "";
+        if (line?.isWrapped && lines.length) lines[lines.length - 1] += text;
+        else lines.push(text);
+      }
+      const prompt = secretPrompt(lines.join("\n"), term.cols);
+      secretRef.current = prompt;
+      term.options.disableStdin = observeRef.current || prompt !== null || heldRef.current;
+      setSecret((previous) => previous?.pane === owner && previous.prompt === prompt ? previous : prompt ? { pane: owner, prompt } : null);
+    };
+    /** a mirror's frames wait while the IME's span is open, and until the screen they make is written */
+    const holdsMirrorFrame = (): boolean => fixedGridRef.current && (heldScreenRef.current !== null || !imeSettled());
+    writeHeldRef.current = () => {
+      const screen = heldScreenRef.current?.take() ?? "";
+      heldScreenRef.current = null;
+      const owner = paneRef.current;
+      if (!screen || owner === null) return;
+      // its frames were acknowledged as they were taken in: this write acknowledges nothing again
+      const generation = outputGeneration;
+      term.write(screen, () => wrote(owner, generation));
+    };
     const off = socket.on((message) => {
       onServerMessageRef.current?.(message);
       if (paneRef.current) setInputReady(socket.canInput(paneRef.current));
       if (message.type === "pty-data") {
         if (message.pane_id !== paneRef.current) return;
-        // raw pty bytes: append, never repaint, so xterm keeps the screen and selection
         const acknowledge = socket.outputAcknowledgement(message);
+        if (holdsMirrorFrame()) {
+          const stream = message.flow?.stream_id ?? null;
+          let held = heldScreenRef.current;
+          if (held === null || held.streamId !== stream) held = heldScreenRef.current = new MirrorCompositionBuffer(stream);
+          // taken into the held screen: received and kept, so acknowledged now, not when it is written
+          const result = held.absorb(message.data, term.rows);
+          if (result.ok) acknowledge?.();
+          // not kept: never acknowledged as if it were. The server's flow control sees the output wait.
+          else if (result.fresh) console.error(`[termweave] mirror output held unacknowledged while the IME composes: ${result.reason}`);
+          return;
+        }
+        // raw pty bytes: append, never repaint, so xterm keeps the screen and selection
         const owner = message.pane_id;
         const generation = outputGeneration;
         term.write(message.data, () => {
           acknowledge?.();
-          if (paneRef.current !== owner || generation !== outputGeneration) return;
-          setOutputReady(true);
-          followCursor();
-          const lines: string[] = [];
-          const buffer = term.buffer.active;
-          for (let row = 0; row < buffer.length; row++) {
-            const line = buffer.getLine(row);
-            const text = line?.translateToString(!buffer.getLine(row + 1)?.isWrapped) ?? "";
-            if (line?.isWrapped && lines.length) lines[lines.length - 1] += text;
-            else lines.push(text);
-          }
-          const prompt = secretPrompt(lines.join("\n"), term.cols);
-          secretRef.current = prompt;
-          term.options.disableStdin = observeRef.current || prompt !== null || heldRef.current;
-          setSecret((previous) => previous?.pane === owner && previous.prompt === prompt ? previous : prompt ? { pane: owner, prompt } : null);
+          wrote(owner, generation);
         });
       } else if (message.type === "attach-resumed") {
         if (message.pane_id === paneRef.current) {
@@ -835,6 +887,8 @@ export function PaneTerminal({
     });
     const offDisconnect = socket.onDisconnect(() => {
       outputGeneration++;
+      // the reconnect starts a new stream from the server's whole screen: what this one held is not its
+      dropHeldScreen();
       setOutputReady(false);
       setInputReady(false);
       setConnected(false);
@@ -1350,10 +1404,12 @@ export function PaneTerminal({
     if (!term || !socket || !pane) return;
     setOutputError(null);
     setEnded(false);
+    // the reset screen is drawn afresh by the attach: a screen held from before it is not drawn over it
+    dropHeldScreen();
     term.reset();
     term.options.disableStdin = observeRef.current;
     socket.attach(pane, term.cols, term.rows, chatViewRef.current);
-  }), [whenSettled]);
+  }), [whenSettled, dropHeldScreen]);
 
   // the composer's stop button: Escape interrupts the agent's current turn in every
   // supported TUI (Claude Code, omp, codex) without killing the process the way ^C would
