@@ -2,6 +2,7 @@ import {describe,expect,it} from 'bun:test';
 import {existsSync,mkdirSync,mkdtempSync,readdirSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {dirname,join} from 'node:path';
 import {acquireLock,judgeLock,lockPaths,matchOwner,signalIdentity,withGuard,type Identity,type LockRecord} from './lifecycle-lock.ts';
 import {decide,inspectLifecycle,removeState,replaceState,stateFile,type LifecycleRecord,type Observation} from './lifecycle-state.ts';
+import {processIdentity} from './process-identity.ts';import {uninstallOwned} from './uninstall.ts';
 
 const STARTED='2026-01-01T00:00:00.000Z',EXE='/opt/bun/bin/bun';
 const lockRecord=(over:Partial<LockRecord>={}):LockRecord=>({pid:4242,startedAt:STARTED,exe:EXE,command:'/owned/scripts/owned-server.ts',operation:'start',nonce:'n-1',...over});
@@ -26,7 +27,7 @@ describe('lifecycle decision table',()=>{
   expect(decide(withLock(lockRecord({operation:'start'}),alive))).toEqual({action:'wait',reason:'starting'});
   expect(decide(withState(stateRecord({status:'starting'}),alive))).toEqual({action:'wait',reason:'starting'});
   expect(decide(withState(stateRecord({status:'starting'}),alive,{budgetExpired:true}))).toEqual({action:'timeout',reason:'starting'});
-  // the conservative default identity carries no start time for a foreign PID: a live (possibly reused) PID stays live
+  // an identity without a start time (the test-only signal probe for a foreign PID): a live (possibly reused) PID stays live
   expect(decide(withLock(lockRecord({operation:'install'}),{state:'alive'}))).toEqual({action:'wait',reason:'installing'});
  });
  it('installing/starting owner gone or with a different identity is reclaimed',()=>{
@@ -83,7 +84,7 @@ describe('lifecycle decision table',()=>{
  });
 });
 
-describe('default identity (replaced by CIM identity in 3C-2)',()=>{
+describe('test-only signal probe',()=>{
  it('distinguishes gone, alive and denied PIDs',async()=>{
   expect(signalIdentity(await deadPid()).state).toBe('gone');
   const self=signalIdentity(process.pid);expect(self.state).toBe('alive');expect(self.startedAt).toBeString();expect(self.exe).toBe(process.execPath);
@@ -136,6 +137,44 @@ describe('work lock and guard',()=>{
     expect(()=>acquireLock(root,'start',{now:c.now,sleep:c.sleep,identity:pid=>pid===process.pid?signalIdentity(pid):{state}})).toThrow(`uncertain (owner identity ${state}`);
     expect(c.t).toBe(0);expect(readFileSync(paths.lock,'utf8')).toBe(before);expect(existsSync(paths.guard)).toBe(false);
    }
+  }finally{rmSync(base,{recursive:true,force:true});}
+ });
+ it('asks the owner identity outside the guard, and only judges the record it was asked for',()=>{
+  const base=fixture();const root=join(base,'owned');const paths=lockPaths(root);
+  try{
+   writeFileSync(paths.lock,JSON.stringify(lockRecord({pid:4242,nonce:'first'})));
+   const asked:{pid:number;guard:boolean}[]=[];
+   // While the first owner is asked about, it hands the lock to a second owner: the answer for the first must not judge the second.
+   const identity=(pid:number):Identity=>{
+    if(pid===process.pid)return signalIdentity(pid);
+    asked.push({pid,guard:existsSync(paths.guard)});
+    if(pid===4242){writeFileSync(paths.lock,JSON.stringify(lockRecord({pid:4343,nonce:'second'})));return {state:'gone'};}
+    return alive;
+   };
+   const c=clock();
+   expect(()=>acquireLock(root,'start',{now:c.now,sleep:c.sleep,identity,budgetMs:200})).toThrow(/timed out after 200 ms.*live owner \(pid 4343/);
+   expect(asked[0]).toEqual({pid:4242,guard:false});expect(asked.slice(1).every(entry=>entry.pid===4343&&!entry.guard)).toBe(true);
+   expect(JSON.parse(readFileSync(paths.lock,'utf8')).nonce).toBe('second');expect(existsSync(paths.guard)).toBe(false);
+  }finally{rmSync(base,{recursive:true,force:true});}
+ });
+ it('a live uninstall lock is never reclaimed by install or stop: every lock is recorded and judged by the same identity adapter',()=>{
+  const base=fixture();const root=join(base,'owned');mkdirSync(root);
+  writeFileSync(join(root,'.termweave-owned.json'),JSON.stringify({product:'termweave',root,inventory:{}}));
+  const attempts:{operation:string;error?:string}[]=[];let published=false;
+  try{
+   // While the uninstall CLI path (default lock options) holds its work lock, the install and stop callers try to take it.
+   uninstallOwned(root,true,{trace:event=>{
+    if(event==='published')published=true;
+    else if(event==='guard-released'&&published&&!attempts.length)for(const operation of ['install','stop'] as const){
+     const c=clock();
+     try{acquireLock(root,operation,{identity:processIdentity,now:c.now,sleep:c.sleep,budgetMs:100}).release();attempts.push({operation});}
+     catch(error){attempts.push({operation,error:String(error)});}
+    }
+   }});
+   // a reclaim would record the attempt without an error
+   const refused=expect.stringMatching(/timed out after 100 ms: work lock .* is held by a live owner \(pid \d+, .*operation uninstall/);
+   expect(attempts).toEqual([{operation:'install',error:refused},{operation:'stop',error:refused}]);
+   expect(existsSync(root)).toBe(false);expect(listing(base)).toEqual([]);
   }finally{rmSync(base,{recursive:true,force:true});}
  });
  it('re-reads partial metadata during the 2 s grace and then fails closed instead of reclaiming',()=>{
@@ -217,7 +256,8 @@ describe('lifecycle state files',()=>{
    expect(c.t).toBeGreaterThanOrEqual(2_000);expect(decide(partial).action).toBe('uncertain');
    writeFileSync(stateFile(root),JSON.stringify(stateRecord({pid:await deadPid()})));
    expect(decide(inspectLifecycle(root))).toEqual({action:'reclaim',target:'state',reason:'gone'});
-   writeFileSync(stateFile(root),JSON.stringify(stateRecord({pid:process.pid,startedAt:signalIdentity(process.pid).startedAt,exe:process.execPath})));
+   const self=processIdentity(process.pid);
+   writeFileSync(stateFile(root),JSON.stringify(stateRecord({pid:process.pid,startedAt:self.startedAt,exe:self.exe})));
    expect(decide({...inspectLifecycle(root),probe:{kind:'boot',boot_id:'boot-1'}})).toEqual({action:'running',port:7317,boot_id:'boot-1'});
    expect(listing(base)).toEqual(['owned']);expect(listing(root)).toEqual(['lifecycle.json']);
   }finally{rmSync(base,{recursive:true,force:true});}

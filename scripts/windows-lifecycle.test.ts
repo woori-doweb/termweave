@@ -42,7 +42,7 @@ try{console.log(JSON.stringify(await launchOwned(${JSON.stringify(root)},{port:$
  const [code,out,err]=await Promise.all([parent.exited,new Response(parent.stdout).text(),new Response(parent.stderr).text()]);
  return {parentPid:parent.pid,code,out,err};
 }
-/** Owned processes this file started; cleanup only ends a PID whose CIM identity still matches what was recorded. */
+/** Owned processes this file started; cleanup only ends a PID whose kernel identity (start time) still matches what was recorded. */
 const owned=new Map<number,ProcessIdentity>();
 const track=(pid:number)=>{const identity=processIdentity(pid);if(identity.state==='alive')owned.set(pid,identity);return identity;};
 function endOwned(pid:number){const recorded=owned.get(pid),now=processIdentity(pid);if(recorded&&now.state==='alive'&&now.startedAt===recorded.startedAt)try{process.kill(pid);}catch{}}
@@ -61,13 +61,13 @@ async function withBase(name:string,fn:(base:string)=>Promise<void>){
   rmSync(base,{recursive:true,force:true});
  }
 }
-describe.if(process.platform==='win32')('Windows owned lifecycle (CIM)',()=>{
+describe.if(process.platform==='win32')('Windows owned lifecycle (kernel process identity)',()=>{
  it('detached launch outlives its parent, writes server.log, records identities and holds no work lock while running',()=>withBase('tw-detach-',async base=>{
   const root=fixtureRoot(base,'owned'),port=freePort();
   const launched=await launchFromParent(root,port);expect(launched.err).toBe('');expect(launched.code).toBe(0);
   const result=JSON.parse(launched.out) as {launcher:number;pid:number;port:number;boot_id:string;log:string};
   const launcher=track(result.launcher),server=track(result.pid);
-  // The launching parent is gone (CIM, not a signal probe); launcher and server survive it.
+  // The launching parent is gone (kernel identity, not a signal probe); launcher and server survive it.
   expect(processIdentity(launched.parentPid).state).toBe('gone');
   await Bun.sleep(500);
   expect(launcher.state).toBe('alive');expect(processIdentity(result.launcher).startedAt).toBe(launcher.startedAt);
@@ -104,9 +104,9 @@ describe.if(process.platform==='win32')('Windows owned lifecycle (CIM)',()=>{
   expect(await cimCount(base)).toBe(2);
   await stopInstance(first,result.launcher,result.pid);expect(await cimCount(base)).toBe(0);
  }),T);
- it('stale reclaim uses the CIM identity: a reused PID is reclaimed, a live owner is not',()=>withBase('tw-reclaim-',async base=>{
+ it('stale reclaim uses the kernel process identity: a reused PID is reclaimed, a live owner is not',()=>withBase('tw-reclaim-',async base=>{
   const root=fixtureRoot(base,'owned'),paths=lockPaths(root);
-  // A live process whose PID the stale records name; it is never the owner they describe unless its exact CIM identity is recorded.
+  // A live process whose PID the stale records name; it is never the owner they describe unless its exact identity is recorded.
   const sleeper=Bun.spawn([process.execPath,'-e',`setTimeout(()=>{},120000);// ${base}`],{stdin:'ignore',stdout:'ignore',stderr:'ignore',windowsHide:true});
   const live=track(sleeper.pid);expect(live.state).toBe('alive');
   const lock=(record:Partial<LockRecord>)=>writeFileSync(paths.lock,JSON.stringify({pid:sleeper.pid,startedAt:live.startedAt,exe:live.exe,command:'owned-server.ts',operation:'start',nonce:'old-nonce',...record}));
@@ -115,11 +115,11 @@ describe.if(process.platform==='win32')('Windows owned lifecycle (CIM)',()=>{
   lock(reused);
   expect(()=>acquireLock(root,'start',{identity:signalIdentity,budgetMs:300})).toThrow('held by a live owner');
   expect((observeFile(paths.lock,parseLockRecord) as {record:LockRecord}).record.nonce).toBe('old-nonce');
-  // CIM identity: CreationDate differs on the same PID, so the lock is reclaimed under the guard.
+  // Kernel identity: the creation time differs on the same PID, so the lock is reclaimed under the guard.
   const events:string[]=[];
   const reclaimed=acquireLock(root,'start',{identity:processIdentity,budgetMs:20_000,trace:event=>events.push(event)});
   expect(events).toContain('reclaimed');expect(reclaimed.release()).toBe(true);
-  // CIM identity of the live owner matches exactly: never reclaimed, the record stays.
+  // The kernel identity of the live owner matches exactly: never reclaimed, the record stays.
   lock({});
   expect(()=>acquireLock(root,'start',{identity:processIdentity,budgetMs:1_500})).toThrow('held by a live owner');
   expect((observeFile(paths.lock,parseLockRecord) as {record:LockRecord}).record.nonce).toBe('old-nonce');

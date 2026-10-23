@@ -121,7 +121,7 @@ export function ownedProcesses(rows:readonly ProcRow[],roots:readonly string[],r
  }
  return {owned,unreadable};
 }
-/** Full Win32_Process table with CreationDate exact (same columns and format as process-identity.ts cimScript). */
+/** Full Win32_Process table with CreationDate exact: the 'o' spelling process-identity.ts records as startedAt (createdIso). */
 export const cimTableScript=[
  "$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.Encoding]::UTF8",
  "try{$rows=@(Get-CimInstance -ClassName Win32_Process | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,@{n='Created';e={if($_.CreationDate){$_.CreationDate.ToUniversalTime().ToString('o')}else{$null}}})",

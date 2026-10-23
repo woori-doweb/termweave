@@ -1,14 +1,14 @@
 import {existsSync,readFileSync,readlinkSync} from 'node:fs';import {win32} from 'node:path';
 import type {Identity} from './lifecycle-lock.ts';import {envValue,type Env} from './lifecycle-env.ts';
-import {parseProcessTable} from '../server/windows-processes.ts';
+import {createdIso,windowsProcessInfo} from '../server/windows-process-info.ts';
 /**
  * One identity adapter for every lifecycle record and comparison (A-5). `startedAt` is an exact, adapter-specific token compared
- * only for equality with a value recorded by the same adapter: Windows CIM CreationDate in UTC ISO (100 ns ticks), Linux
- * `<btime>:<starttime ticks>` from /proc, other POSIX the `ps` lstart text. A failed query is `error` (or `denied`), never `gone`:
+ * only for equality with a value recorded by the same adapter: Windows the kernel's creation time read in-process (no PowerShell
+ * spawn) and spelled as CIM CreationDate in UTC ISO, Linux `<btime>:<starttime ticks>` from /proc, other POSIX the `ps` lstart text. A failed query is `error` (or `denied`), never `gone`:
  * only a successful query that finds no such process proves the PID is free.
  */
 export type ProcessIdentity=Identity&{pid:number;commandLine?:string;parentPid?:number;detail?:string};
-/** A CIM query that stalls is killed here and reported as `error`. */
+/** A process query (`ps`, or a PowerShell CIM table read by the acceptance tool) that stalls is killed here and reported as `error`. */
 export const QUERY_TIMEOUT_MS=15_000;
 const SELF=new Map<number,ProcessIdentity>();
 /** Default identity probe for lifecycle-lock/state callers. The own process never changes identity, so its first live answer is reused. */
@@ -18,10 +18,10 @@ export function processIdentity(pid:number):ProcessIdentity{
  if(pid===process.pid&&identity.state==='alive')SELF.set(pid,identity);
  return identity;
 }
-/** One uncached OS query. `env` only selects SystemRoot for the Windows PowerShell path. */
-export function queryIdentity(pid:number,env:Env=process.env):ProcessIdentity{
+/** One uncached OS query. */
+export function queryIdentity(pid:number):ProcessIdentity{
  if(!Number.isSafeInteger(pid)||pid<=0)return {state:'error',pid,detail:`invalid pid ${pid}`};
- return process.platform==='win32'?windowsIdentity(pid,env):process.platform==='linux'?linuxIdentity(pid):psIdentity(pid);
+ return process.platform==='win32'?windowsIdentity(pid):process.platform==='linux'?linuxIdentity(pid):psIdentity(pid);
 }
 /** `<SystemRoot>\System32\WindowsPowerShell\v1.0\powershell.exe` only for a plain absolute drive path; no PATH lookup, no relative or `..` root. */
 export function windowsPowerShell(env:Env=process.env):string{
@@ -31,35 +31,12 @@ export function windowsPowerShell(env:Env=process.env):string{
  if(!existsSync(exe))throw new Error(`Windows PowerShell not found at ${exe}`);
  return exe;
 }
-/** Same Select-Object columns as server/windows-processes.ts, plus CreationDate kept exact instead of rounded to milliseconds. */
-export const cimScript=(pid:number)=>[
- "$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.Encoding]::UTF8",
- `try{$rows=@(Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId=${pid}' | Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,@{n='Created';e={if($_.CreationDate){$_.CreationDate.ToUniversalTime().ToString('o')}else{$null}}})`,
- " [Console]::Out.Write((ConvertTo-Json -Compress -Depth 3 -InputObject @{rows=$rows}))}",
- "catch{[Console]::Out.Write((ConvertTo-Json -Compress -InputObject @{error=[string]$_.CategoryInfo.Category;message=[string]$_.Exception.Message}));exit 2}",
-].join('\n');
-/** Pure: the PowerShell answer for one PID as an identity. Anything unparseable or a non-zero exit is `error`, never `gone`. */
-export function parseCimIdentity(pid:number,exitCode:number|null,stdout:string):ProcessIdentity{
- let value:unknown;try{value=JSON.parse(stdout);}catch{return {state:'error',pid,detail:`CIM query exit ${exitCode} without JSON`};}
- const v=value as {rows?:unknown;error?:unknown;message?:unknown}|null;
- if(v&&typeof v==='object'&&typeof v.error==='string')return {state:v.error==='PermissionDenied'?'denied':'error',pid,detail:`CIM ${v.error}: ${String(v.message??'')}`.trim()};
- if(exitCode!==0||!v||typeof v!=='object'||!Array.isArray(v.rows))return {state:'error',pid,detail:`CIM query exit ${exitCode} with unexpected output`};
- const rows=parseProcessTable(JSON.stringify(v.rows)).filter(row=>row.pid===pid);
- if(rows.length!==v.rows.length||rows.length>1)return {state:'error',pid,detail:'CIM returned malformed rows'};
- if(rows.length===0)return {state:'gone',pid};
- const row=rows[0]!,created=(v.rows[0] as {Created?:unknown}).Created;
- const base={pid,parentPid:row.parent,exe:row.path??undefined,commandLine:row.commandLine??undefined};
- // A row without CreationDate cannot be told apart from a reused PID: uncertain, never alive-and-matching.
- return typeof created==='string'&&created?{state:'alive',startedAt:created,...base}:{state:'denied',...base,detail:'CreationDate unreadable'};
-}
-function windowsIdentity(pid:number,env:Env):ProcessIdentity{
- let exe:string;try{exe=windowsPowerShell(env);}catch(error){return {state:'error',pid,detail:String((error as Error).message)};}
- try{
-  const result=Bun.spawnSync([exe,'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',Buffer.from(cimScript(pid),'utf16le').toString('base64')],{stdin:'ignore',stdout:'pipe',stderr:'pipe',windowsHide:true,timeout:QUERY_TIMEOUT_MS,killSignal:'SIGKILL'});
-  const identity=parseCimIdentity(pid,result.exitCode,new TextDecoder('utf-8').decode(result.stdout));
-  if(identity.state==='error'){const stderr=new TextDecoder('utf-8').decode(result.stderr).trim();if(stderr)identity.detail=`${identity.detail}; ${stderr.slice(0,500)}`;}
-  return identity;
- }catch(error){return {state:'error',pid,detail:String((error as Error).message)};}
+/** The kernel's answer for one PID (server/windows-process-info.ts), with the start time spelled as CIM CreationDate. */
+function windowsIdentity(pid:number):ProcessIdentity{
+ const info=windowsProcessInfo(pid);
+ if(info.state!=='alive')return info;
+ const {createdTicks,parentPid,exe,commandLine}=info;
+ return {state:'alive',pid,startedAt:createdIso(createdTicks),parentPid,exe,commandLine};
 }
 const fsCode=(error:unknown)=>String((error as {code?:unknown})?.code??'unknown');
 /** Pure: `/proc/<pid>/stat` (comm may contain spaces and parentheses) with the boot time, as `<btime>:<starttime>` and the parent PID. */

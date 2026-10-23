@@ -65,7 +65,7 @@ Bun.serve({port:Number(process.env.TW_PORT),hostname:'127.0.0.1',fetch(request){
   writeFileSync(stateFile(root),JSON.stringify({status:'running',pid:stand.pid,startedAt:identity.startedAt,exe:identity.exe,port,boot_id:boot,stop_token:'t'.repeat(48)}));
  },T);
  afterAll(async()=>{
-  // Ends only the stand-in this file started, and only while its CIM identity is still the one recorded.
+  // Ends only the stand-in this file started, and only while its kernel identity (start time) is still the one recorded.
   if(stand&&identity){const now=processIdentity(stand.pid);if(now.state==='alive'&&now.startedAt===identity.startedAt)stand.kill();await stand.exited;}
   const left=(await windowsProcessTable()).filter(row=>(row.commandLine??'').toLowerCase().includes(base.toLowerCase()));
   expect(left).toEqual([]);

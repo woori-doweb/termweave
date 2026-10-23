@@ -90,9 +90,11 @@ function assertOwnership({owners,lockNonce,tombNonces}:{owners:string[];lockNonc
 /** Negative-control module: a copy of the real helper whose guard entry is replaced by a no-op. Product source stays unchanged. */
 function unguardedCopy(f:Fixture){
  const source=readFileSync(LOCK,'utf8');let replaced=0;
- const copy=source.replace("from './lifecycle-path.ts'",()=>{replaced++;return `from ${JSON.stringify(join(import.meta.dir,'lifecycle-path.ts'))}`;})
+ // every relative import (lifecycle-path.ts, process-identity.ts) resolves from scripts/; a new or renamed one fails the count
+ const relative=source.match(/from '\.{1,2}\//g)?.length??0;expect(relative).toBe(2);
+ const copy=source.replace(/from '(\.{1,2}\/[^']+)'/g,(_,path:string)=>{replaced++;return `from ${JSON.stringify(join(import.meta.dir,path))}`;})
   .replace(/(function enterGuard\([^)]*\):\(\)=>void\{)/,(head)=>{replaced++;return `${head}return ()=>{};`;});
- expect(replaced).toBe(2);expect(copy).not.toBe(source);
+ expect(replaced).toBe(relative+1);expect(copy).not.toBe(source);
  const path=join(f.ctl,'lifecycle-lock.unguarded.ts');writeFileSync(path,copy);return path;
 }
 const T=60_000;

@@ -66,7 +66,7 @@ async function cli(base:string,args:string[]){
 type State={status:string;pid:number;port:number;boot_id:string;startedAt:string;exe:string;launcher:number;stop_token:string;launcher_identity:{pid:number;startedAt:string}};
 const readState=(root:string)=>JSON.parse(readFileSync(stateFile(root),'utf8')) as State;
 const stopRequest=(port:number,init:RequestInit={})=>fetch(`http://127.0.0.1:${port}${OWNED_STOP_PATH}`,{method:'POST',...init,signal:AbortSignal.timeout(3_000)});
-/** Owned processes this file started; cleanup only ends a PID whose CIM identity still matches what was recorded. */
+/** Owned processes this file started; cleanup only ends a PID whose identity (start time) still matches what was recorded. */
 const owned=new Map<number,ProcessIdentity>();
 const track=(pid:number)=>{const identity=processIdentity(pid);if(identity.state==='alive')owned.set(pid,identity);return identity;};
 function endOwned(pid:number){const recorded=owned.get(pid),now=processIdentity(pid);if(recorded&&now.state==='alive'&&now.startedAt===recorded.startedAt)try{process.kill(pid);}catch{}}
@@ -238,7 +238,7 @@ describe.if(process.platform==='win32')('owned stop and check (stand-in server)'
   await expectTokenHidden(base,join(root,'server.log'),token,silent.out,silent.err,timeout.out,timeout.err);
   // The printed recovery command stops nothing when the process no longer matches (here: another start time), and ends it when it does.
   const recovery=timeout.err.split('\n').map(line=>line.trim()).find(line=>line.startsWith('$p=Get-CimInstance'))!;
-  expect(recovery).toContain(`-eq '${state.startedAt}'`);expect(recovery).toContain(`-eq '${state.exe}'`);
+  expect(recovery).toContain(`-eq '${state.startedAt}'`);expect(recovery).not.toContain('ExecutablePath');
   const powershell=(script:string)=>{const result=Bun.spawnSync([windowsPowerShell(),'-NoProfile','-NonInteractive','-Command',script],{stdout:'pipe',stderr:'pipe',windowsHide:true});return result.stdout.toString().trim();};
   expect(powershell(recovery.replace(`'${state.startedAt}'`,"'2000-01-01T00:00:00.0000000Z'"))).toBe(`Process ${state.pid} changed or is gone: not stopped`);
   expect(gone(state.pid)).toBe(false);

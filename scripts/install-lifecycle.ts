@@ -174,12 +174,18 @@ function stopDiagnostics(context:Context,dir:string,cause:StopCause,headline:str
   line(`bridge probe  ${describeProbe(probe,record.boot_id)}`);
  }
  line(STOP_GUIDANCE[cause].replace('<port>',owned?String(owned.record.port):'<port>'));
- if(owned&&cause!=='foreign'&&owned.record.startedAt&&owned.record.exe){
-  const {pid,startedAt,exe}=owned.record;
+ const windows=process.platform==='win32';
+ if(owned&&cause!=='foreign'&&owned.record.startedAt&&(windows||owned.record.exe)){
+  const {pid,startedAt}=owned.record;
   line('Nothing was killed. Only if you decide this server must end now, end it by hand with a command that re-checks the same');
-  line('process (PID, start time and executable) right before stopping it and stops nothing if any of them changed:');
-  if(process.platform==='win32')line(`  $p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if($p -and $p.CreationDate -and $p.CreationDate.ToUniversalTime().ToString('o') -eq ${psQuote(startedAt)} -and $p.ExecutablePath -eq ${psQuote(exe)}){Stop-Process -Id ${pid}}else{'Process ${pid} changed or is gone: not stopped'}`);
-  else line(`  ps -o lstart=,comm= -p ${pid}   then, only if its start time and executable still match the lines above: kill ${pid}`);
+  // Windows compares PID and creation time only: CIM's ExecutablePath may spell a junction install differently from the kernel's recorded exe.
+  if(windows){
+   line('process (PID and start time) right before stopping it and stops nothing if either changed:');
+   line(`  $p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if($p -and $p.CreationDate -and $p.CreationDate.ToUniversalTime().ToString('o') -eq ${psQuote(startedAt)}){Stop-Process -Id ${pid}}else{'Process ${pid} changed or is gone: not stopped'}`);
+  }else{
+   line('process (PID, start time and executable) right before stopping it and stops nothing if any of them changed:');
+   line(`  ps -o lstart=,comm= -p ${pid}   then, only if its start time and executable still match the lines above: kill ${pid}`);
+  }
   line('Do not reuse the PID number alone later: Windows reuses PIDs. The launcher then removes lifecycle.json and exits on its own.');
  }
  line(`Afterwards confirm the state with: bun scripts/install-lifecycle.ts check --dir "${dir}"`);

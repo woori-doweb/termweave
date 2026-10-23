@@ -1,5 +1,5 @@
 import {closeSync,openSync,readdirSync,readFileSync,renameSync,rmSync,statSync,unlinkSync,writeFileSync,writeSync} from 'node:fs';import {basename,dirname,join} from 'node:path';import {createHash,randomUUID} from 'node:crypto';
-import {canonicalIdentity} from './lifecycle-path.ts';
+import {canonicalIdentity} from './lifecycle-path.ts';import {processIdentity} from './process-identity.ts';
 /**
  * Per-target lifecycle work lock serialized by one shared `wx` guard (C-6). Both files are siblings of the install root (never
  * inside it, so the root is not created for the lock), named from a digest of the canonical target key so every alias of the
@@ -32,8 +32,9 @@ type Resolved=Required<LockOptions>;
 const errorCode=(error:unknown)=>String((error as {code?:unknown})?.code??'unknown');
 const SELF_STARTED=new Date(Math.round(performance.timeOrigin)).toISOString();
 /**
- * Conservative default identity: `process.kill(pid,0)` only (ESRCH gone, EPERM denied, success alive). A foreign live PID carries
- * no start time or exe, so a live (possibly reused) PID is never judged stale. 3C-2 replaces this with the CIM-based processIdentity.
+ * Test-only signal probe, injected as a fake or a negative control; never a production default. `process.kill(pid,0)` only (ESRCH
+ * gone, EPERM denied, success alive): a foreign live PID carries no start time or exe, so it cannot see PID reuse. Its own record
+ * uses another start-time spelling than processIdentity, so the two must never judge each other's records.
  */
 export function signalIdentity(pid:number):Identity{
  if(pid===process.pid)return {state:'alive',startedAt:SELF_STARTED,exe:process.execPath};
@@ -85,7 +86,7 @@ export function judgeLock(observation:FileObservation<LockRecord>,owner:Identity
  if(match==='uncertain')return {verdict:'uncertain',reason:`owner identity ${owner.state}`,record};
  return {verdict:'stale',record,reason:match};
 }
-const resolveOptions=(operation:Operation,options:LockOptions):Resolved=>({budgetMs:options.budgetMs??BUDGET_MS[operation],now:options.now??Date.now,sleep:options.sleep??Bun.sleepSync,identity:options.identity??signalIdentity,command:options.command??process.argv[1]??process.execPath,trace:options.trace??(()=>{})});
+const resolveOptions=(operation:Operation,options:LockOptions):Resolved=>({budgetMs:options.budgetMs??BUDGET_MS[operation],now:options.now??Date.now,sleep:options.sleep??Bun.sleepSync,identity:options.identity??processIdentity,command:options.command??process.argv[1]??process.execPath,trace:options.trace??(()=>{})});
 const describe=(record:LockRecord)=>`pid ${record.pid}, started ${record.startedAt??'unknown'}, exe ${record.exe??'unknown'}, command ${record.command}, operation ${record.operation}`;
 function selfRecord(operation:Operation,o:Resolved):LockRecord{
  const self=o.identity(process.pid);if(self.state!=='alive')throw new Error(`Own process identity unavailable (${self.state})`);
@@ -184,10 +185,17 @@ export function acquireLock(root:string,operation:Operation,options:LockOptions=
  let partial:{file:string;since:number}|undefined,waited:LockVerdict|undefined;
  const expired=(verdict:LockVerdict)=>new Error(`Lifecycle ${operation} for ${paths.target} timed out after ${o.budgetMs} ms: work lock ${paths.lock} ${verdict.verdict==='live'?`is held by a live owner (${describe(verdict.record)})`:'metadata is still being written'}. A live owner is never reclaimed.`);
  for(;;){
-  const outcome=guarded(paths,operation,deadline,o,():{handle:LockHandle}|{verdict:LockVerdict}=>{
+  // The owner's identity is an OS query (a `ps` spawn on macOS, whatever probe the caller injects): asked before the guard, so a waiter
+  // never holds the guard through it and starves the owner's own guarded steps; inside, it counts only for the record it was asked for.
+  // Safe out of the guard: the nonce is re-checked under the guard, and for a fixed owner gone/mismatch never revert to match, so a
+  // stale answer can only make a waiter wait longer or refuse, never reclaim a live owner.
+  const seen=observeFile(paths.lock,parseLockRecord);
+  const asked=seen.kind==='record'?{nonce:seen.record.nonce,identity:o.identity(seen.record.pid)}:undefined;
+  const outcome=guarded(paths,operation,deadline,o,():{handle:LockHandle}|{verdict:LockVerdict}|{changed:true}=>{
    const observation=observeFile(paths.lock,parseLockRecord);
+   if(observation.kind==='record'&&observation.record.nonce!==asked?.nonce)return {changed:true};
    if(observation.kind==='partial'){if(partial?.file!==observation.file)partial={file:observation.file,since:o.now()};}else partial=undefined;
-   const verdict=judgeLock(observation,observation.kind==='record'?o.identity(observation.record.pid):undefined,partial?o.now()-partial.since:0);
+   const verdict=judgeLock(observation,asked?.identity,partial?o.now()-partial.since:0);
    o.trace('recheck',{verdict:verdict.verdict,nonce:observation.kind==='record'?observation.record.nonce:undefined});
    if(verdict.verdict==='free')return {handle:publish(paths,operation,deadline,o)};
    if(verdict.verdict!=='stale')return {verdict};
@@ -196,6 +204,8 @@ export function acquireLock(root:string,operation:Operation,options:LockOptions=
    return {handle:publish(paths,operation,deadline,o)};
   },waited&&(()=>expired(waited!)));
   if('handle' in outcome)return outcome.handle;
+  // another record since the identity was asked: ask again for that owner, within the same deadline
+  if('changed' in outcome){if(o.now()>=deadline)throw waited?expired(waited):new Error(`Lifecycle ${operation} for ${paths.target} timed out after ${o.budgetMs} ms: work lock ${paths.lock} kept changing owner`);continue;}
   const verdict=outcome.verdict;waited=verdict;
   if(verdict.verdict==='uncertain')throw new Error(`Lifecycle ${operation} for ${paths.target} refused: work lock ${paths.lock} owner is uncertain (${verdict.reason}${verdict.record?`; ${describe(verdict.record)}`:''}). It is not reclaimed; check that owner, then retry.`);
   if(o.now()>=deadline)throw expired(verdict);

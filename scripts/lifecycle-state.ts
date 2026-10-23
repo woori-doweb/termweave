@@ -1,5 +1,6 @@
 import {join} from 'node:path';
-import {GRACE_MS,discardFile,judgeLock,matchOwner,observeFile,readLock,signalIdentity,withGuard,writeAtomic,type FileObservation,type Identity,type IdentityProbe,type LockOptions,type LockRecord,type Operation} from './lifecycle-lock.ts';
+import {GRACE_MS,discardFile,judgeLock,matchOwner,observeFile,readLock,withGuard,writeAtomic,type FileObservation,type Identity,type IdentityProbe,type LockOptions,type LockRecord,type Operation} from './lifecycle-lock.ts';
+import {processIdentity} from './process-identity.ts';
 /**
  * Persistent lifecycle states are exactly four. `installing` is the external work record (the work lock with operation
  * `install`, outside the root, which may not exist yet); `starting`, `running` and `stopping` live in `<root>/lifecycle.json`.
@@ -72,7 +73,7 @@ export type InspectOptions={identity?:IdentityProbe;now?:()=>number;sleep?:(ms:n
  * `--check` read helper: never creates the guard, a lock or the root. Partial files are re-read for up to the grace period;
  * reads that keep disagreeing are reported as unstable (uncertain) after a bounded number of attempts.
  */
-export function inspectLifecycle(root:string,{identity=signalIdentity,now=Date.now,sleep=Bun.sleepSync}:InspectOptions={}):Observation{
+export function inspectLifecycle(root:string,{identity=processIdentity,now=Date.now,sleep=Bun.sleepSync}:InspectOptions={}):Observation{
  const read=()=>{const {guard,lock}=readLock(root);return {guard,lock,state:observeFile(stateFile(root),parseLifecycleRecord)};};
  const partialSince:{lock?:{file:string;at:number};state?:{file:string;at:number}}={};
  for(;;){

@@ -1,6 +1,9 @@
 import {acquireLock,type LockOptions} from './lifecycle-lock.ts';
 import {existsSync,lstatSync,readFileSync,readdirSync,rmSync,readlinkSync,realpathSync,rmdirSync} from 'node:fs';import {resolve,join,relative} from 'node:path';import {createHash} from 'node:crypto';
-/** Fail closed on unowned data or active/uncertain lifecycle state. The work lock lives outside the root and is released last, by nonce. */
+/**
+ * Fail closed on unowned data or active/uncertain lifecycle state. The work lock lives outside the root and is released last, by nonce.
+ * It records the default processIdentity, the adapter every install/start/stop caller judges it with, so a live uninstall is never reclaimed.
+ */
 export function uninstallOwned(directory:string,confirm:boolean,lockOptions:LockOptions={}){
  const root=resolve(directory);if(!confirm||root==='/'||root===process.env.HOME||existsSync(join(root,'.git')))throw new Error('Unsafe or unconfirmed uninstall');
  if(realpathSync(root)!==root)throw new Error('Symlink root or ancestor refused');
