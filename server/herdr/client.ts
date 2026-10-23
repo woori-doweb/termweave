@@ -49,22 +49,41 @@ function nextId(): string {
   return `br-${Date.now().toString(36)}-${requestCounter}`;
 }
 
+export interface LineReader {
+  /** bytes as they arrived: a character cut at the end of a chunk waits for the rest of it in the next */
+  push(chunk: Uint8Array): void;
+  /**
+   * The connection ended. The bytes of a character it cut off become U+FFFD, and the text
+   * after the last newline is returned, never passed on as a line: a frame without its
+   * newline is one herdr did not finish.
+   */
+  end(): string;
+}
+
 /**
  * Splits a growing buffer into complete newline-terminated frames.
- * herdr frames arrive split across reads, so partial tails must be retained.
+ * herdr frames arrive split across reads, so partial tails must be retained. Bytes that are
+ * no UTF-8 become U+FFFD, as TextDecoder makes them; the line is still parsed.
  */
-function makeLineReader(onLine: (line: string) => void): (chunk: Uint8Array) => void {
+export function makeLineReader(onLine: (line: string) => void): LineReader {
   const decoder = new TextDecoder();
   let buffer = "";
-  return (chunk: Uint8Array) => {
-    buffer += decoder.decode(chunk, { stream: true });
-    let index = buffer.indexOf("\n");
-    while (index !== -1) {
-      const line = buffer.slice(0, index).trim();
-      buffer = buffer.slice(index + 1);
-      if (line.length > 0) onLine(line);
-      index = buffer.indexOf("\n");
-    }
+  return {
+    push(chunk) {
+      buffer += decoder.decode(chunk, { stream: true });
+      let index = buffer.indexOf("\n");
+      while (index !== -1) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+        if (line.length > 0) onLine(line);
+        index = buffer.indexOf("\n");
+      }
+    },
+    end() {
+      const tail = buffer + decoder.decode();
+      buffer = "";
+      return tail;
+    },
   };
 }
 
@@ -118,18 +137,20 @@ export async function herdrRpc<T = unknown>(
       finish(() => resolve(frame.result as T));
     };
 
-    const onData = makeLineReader(handleLine);
+    const reader = makeLineReader(handleLine);
 
     Bun.connect({
       unix: socketAddress(socketPath),
       socket: {
         data(_sock, chunk) {
-          onData(chunk);
+          reader.push(chunk);
         },
         error(_sock, err) {
           finish(() => reject(new HerdrError("socket_error", err?.message ?? "herdr socket error")));
         },
         close() {
+          // an unfinished frame is no answer: the tail is dropped and the request fails as closed
+          reader.end();
           finish(() => reject(new HerdrError("closed", `herdr closed the connection before answering ${method}`)));
         },
       },
@@ -322,7 +343,7 @@ export function subscribeEvents(
   let socket: { end: () => void } | null = null;
   let started = false;
 
-  const onData = makeLineReader((line) => {
+  const reader = makeLineReader((line) => {
     // closed by the caller: frames still buffered belong to a subscription it replaced
     if (closed) return;
     let frame: { id?: string; result?: { type?: string }; error?: { code?: string; message?: string } } & EventFrame;
@@ -347,12 +368,14 @@ export function subscribeEvents(
     unix: socketAddress(socketPath),
     socket: {
       data(_sock, chunk) {
-        onData(chunk);
+        reader.push(chunk);
       },
       error(_sock, err) {
         if (!closed) handlers.onError?.(new HerdrError("socket_error", err?.message ?? "herdr socket error"));
       },
       close() {
+        // an event cut off by the close is not delivered
+        reader.end();
         if (!closed) {
           closed = true;
           handlers.onClose?.();
