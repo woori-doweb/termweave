@@ -62,7 +62,7 @@ import { PasteImageError, savePaneImage } from "./paste.ts";
 import { PtySession } from "./pty/session.ts";
 import { attachableIdentity, sidecarAvailable } from "./pty/sidecar.ts";
 import { MirrorSession } from "./mirror.ts";
-import { mirrorInput } from "./mirror-input.ts";
+import { mirrorInput, mirrorKeys } from "./mirror-input.ts";
 import { OutputWindow, OUTPUT_HIGH_BYTES, OUTPUT_HARD_BYTES, OUTPUT_STALL_MS, ReplayBuffer } from "./output-window.ts";
 import { OUTPUT_STALLED_CLOSE_CODE } from "../shared/terminal-flow.ts";
 import { connectUpdater, handleUpdateRequest, type UpdateService } from "./update-api.ts";
@@ -1792,6 +1792,15 @@ export function createServer(
                 void serialize(message.pane_id, async () => {
                   // a herdr that attaches: typing reaches an attached pane only
                   if (await terminalAttach()) { inputFailed(); return; }
+                  // a key herdr drops as text goes as its own key
+                  const keys = mirrorKeys(text);
+                  if (keys) {
+                    if (!clients.has(client)) return;
+                    authorizeSocket(client);
+                    await paneSendKeys(message.pane_id, keys);
+                    attachments.get(message.pane_id)?.mirror?.poke();
+                    return;
+                  }
                   // a pasted block asks herdr what the pane runs, so it is shaped before the checks below
                   const shaped = await mirrorInput(text, async () => (await paneContext(message.pane_id)).agent);
                   // nothing typed outlives its connection
