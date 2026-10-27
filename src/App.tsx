@@ -26,7 +26,7 @@ import { takeAuthTokenFromUrl } from "./lib/authLink.ts";
 import { applyPaneStatus } from "./lib/snapshot.ts";
 import { SnapshotRequests } from "./lib/snapshotRequests.ts";
 import { alertPrefs, useSettings, type DefaultView } from "./lib/settings.ts";
-import { useShortcuts } from "./lib/shortcuts.ts";
+import { shortcutHint, useShortcuts } from "./lib/shortcuts.ts";
 import type { AppActions, PaneView } from "./lib/actions.ts";
 import {
   notificationState,
@@ -707,6 +707,9 @@ export function App() {
   }
   if (locked) return <><header className="app-header"><Brand /><div className="header-meta"><FrontendControls /></div></header><AccessGate reason={lockReason} initialCode={pairCode} onUnlocked={unlock} /></>;
 
+  const sidebarHint = shortcutHint("toggle-sidebar", settings.shortcutOverrides);
+  const viewHint = shortcutHint("toggle-view", settings.shortcutOverrides);
+  const paletteHint = shortcutHint("palette", settings.shortcutOverrides);
   return (
     <MachineContext.Provider value={selectedMachineId}><div className={`app${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <header className="app-header">
@@ -725,7 +728,7 @@ export function App() {
           className="icon-button header-desktop-only sidebar-toggle"
           aria-label={t(sidebarCollapsed ? "Show workspace list" : "Hide workspace list")}
           aria-pressed={!sidebarCollapsed}
-          title={t("Toggle sidebar (⌘⇧B)")}
+          title={sidebarHint ? `${t("Toggle sidebar")} (${sidebarHint})` : t("Toggle sidebar")}
           onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
         >
           <PanelLeft />
@@ -754,11 +757,11 @@ export function App() {
         )}
         {selectedPane && (
           <div className="segmented view-switch" role="group" aria-label="Pane view">
-            <button type="button" aria-pressed={view === "chat"} onClick={() => setView("chat")} title={t("Chat transcript (⌘⇧J)")}>
+            <button type="button" aria-pressed={view === "chat"} onClick={() => setView("chat")} title={viewHint ? `${t("Chat transcript")} (${viewHint})` : t("Chat transcript")}>
               <MessageSquare />
               <span className="header-desktop-only">{t("Chat")}</span>
             </button>
-            <button type="button" aria-pressed={view === "terminal"} onClick={() => setView("terminal")} title={terminalAttach ? t("Live terminal (⌘⇧J)") : t("Live terminal: coming to Windows PCs once herdr can attach there")}>
+            <button type="button" aria-pressed={view === "terminal"} onClick={() => setView("terminal")} title={terminalAttach ? (viewHint ? `${t("Live terminal")} (${viewHint})` : t("Live terminal")) : t("Live terminal: coming to Windows PCs once herdr can attach there")}>
               <SquareTerminal />
               <span className="header-desktop-only">{t("Terminal")}</span>
               {!terminalAttach && <span className="pill pill-soon">{t("soon")}</span>}
@@ -783,7 +786,7 @@ export function App() {
               <FolderOpen />
             </button>
           )}
-          <button type="button" className="icon-button" aria-label={t("Command palette")} title={t("Command palette (⌘⇧K)")} onClick={() => setPaletteOpen(true)}>
+          <button type="button" className="icon-button" aria-label={t("Command palette")} title={paletteHint ? `${t("Command palette")} (${paletteHint})` : t("Command palette")} onClick={() => setPaletteOpen(true)}>
             <Search />
           </button>
           <button
