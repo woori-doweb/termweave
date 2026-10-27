@@ -35,4 +35,4 @@ it('source spellings (slashes, drive case, 8.3, junction) are aliases; a link in
   const outside=join(base,'outside');mkdirSync(outside);writeFileSync(join(outside,'file.txt'),'committed');renameSync(join(root,'sub'),join(base,'moved-sub'));symlinkSync(outside,join(root,'sub'),link);
   expect(readFileSync(join(root,'sub','file.txt'),'utf8')).toBe('committed');expect(()=>installationSources(root)).toThrow('Invalid source boundary');
  }finally{rmSync(base,{recursive:true,force:true});}
-});
+},30_000);

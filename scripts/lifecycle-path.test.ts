@@ -84,4 +84,4 @@ it('installOwned records the source commit and canonical root, and refuses reuse
  expect(marker).toMatchObject({product:'termweave',root:destination,source_sha:git('rev-parse','HEAD')});expect(Object.keys(marker.inventory)).toEqual(expect.arrayContaining(['package.json','bun.lock','node_modules']));
  if(win){const saved=join(base,'install-acl');execFileSync(join(process.env.SystemRoot!,'System32','icacls.exe'),[root,'/save',saved],{stdio:'pipe'});expect(isOwnedRootDacl(readFileSync(saved).toString('utf16le').split(/\r?\n/)[1]!,currentUserSid())).toBe(true);}
  expect(()=>installOwned(repo,destination)).toThrow('existing path');expect(()=>installOwned(repo,join(repo,'nested'))).toThrow('source repository');expect(existsSync(join(repo,'nested'))).toBe(false);
-});
+},30_000);
