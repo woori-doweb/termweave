@@ -242,6 +242,16 @@ test("separate processes claim disjoint scopes", async () => {
   // the child's error code, not just its exit status, names a failure
   expect(outcomes.map((r) => `${r.code}:${r.out}`)).toEqual(["0:claimed", "0:claimed"]);
 });
+test("simultaneous first starts on a fresh state directory all open it", async () => {
+  // the barrier releases every start at once, so two of them publish the sentinel together; a plain Windows rename
+  // refused to replace the sentinel the other start had open (EPERM on about one start in ten; with the plain rename
+  // this test failed in 7 of 11 local runs, so it catches a regression most of the time, not always)
+  const barrier = join(root, "go"); const ids = Array.from({ length: 10 }, (_, i) => `s${i}`);
+  const starts = ids.map((id) => child(id, file(`src/${id}.ts`), barrier));
+  while (!ids.every((id) => existsSync(`${barrier}.${id}.ready`))) await Bun.sleep(5);
+  writeFileSync(barrier, "go");
+  expect((await results(starts)).map((r) => `${r.code}:${r.out}:${r.err}`)).toEqual(ids.map(() => "0:claimed:"));
+}, 30_000);
 test("database contention fails closed then recovers without partial writes", async () => {
   store(); const lock = new Database(join(stateDir, "ownership.sqlite"));
   // COMMIT can briefly overlap the contender's schema read. Let this fixture
