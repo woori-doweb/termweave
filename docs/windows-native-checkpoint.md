@@ -74,8 +74,8 @@ GJC_SESSION_ID=01a16372-c9d9-7570-8438-98981989f916 gjc ultragoal status
 **TermWeave 밖이거나 설계 한계 (기록만 함)**
 
 - Ctrl+C 로 실행 중인 프로세스를 중단할 수 없다. herdr 측 결함이며, herdr CLI `send-keys ctrl+c` 로도 재현된다.
-- mirror 에 휠 스크롤백이 없다.
-- 헤드리스 120x40 고정이라 분할할 때마다 폭이 반으로 준다.
+- (해소) Windows 터미널은 이제 herdr `terminal session control` 로 pane 을 스트리밍한다(`server/herdr/terminal-session.ts`). 그리드가 브라우저 창을 따르고, 커서가 보이며, 휠과 한 손가락 드래그는 `terminal.scroll` 로 herdr 에 간다. 실기 e2e(2026-10-28, Edge CDP, 시험 pane): 그리드 48행 = herdr viewport 48, 창 축소 후 31 = 31, 커서 표시, 휠 offset 0→33 후 입력하면 0, gjc IME 조합창이 입력줄 행에 뜬다. Ctrl+C(`terminal.input` \x03)는 여전히 `ping -t` 를 멈추지 못한다.
+- mirror 는 session control 이 시작되지 못할 때의 폴백으로만 남는다. 그때는 휠과 드래그가 herdr `pane.scroll` 로 히스토리를 스크롤하고, 그리드는 헤드리스 120x40 고정이라 분할할 때마다 폭이 반으로 준다.
 - herdr 유휴 CPU 가 약 4.6 % 다.
 
 ## 3. 완료된 것
@@ -184,4 +184,4 @@ CI 가 실패하면:
 - Windows pane-mesh task 소유권은 구현되지 않았다. CLI 는 `native_server_identity_unavailable` 로 fail closed 한다.
 - pane-directory 의 herdr 세대 live 확인(lsof/ps)은 Windows 에 없다. fail closed 한다.
 - 5cMesh 상태 디렉터리와 handle 파일은 프로필 상속 ACL 에 의존한다. 비밀은 아니다.
-- 사용자 관점 한계는 2.2 절에 있다: Ctrl+C, 스크롤백, 분할 폭, herdr 유휴 CPU.
+- 사용자 관점 한계는 2.2 절에 있다: Ctrl+C, herdr 유휴 CPU. 분할 폭 반감은 mirror 폴백에만 남는다.

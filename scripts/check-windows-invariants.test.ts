@@ -61,7 +61,7 @@ describe('lifecycle-env: spawns get their env from buildChildEnv only',()=>{
 });
 
 describe('input-path: composition -> sendInput -> send_text',()=>{
- it('sendData no longer sending through socket.sendInput fails',()=>violates('input-path',INPUT_FILES.pane,'if (socket.sendInput(current, input)) return;','if (socket.submit(current, input, input)) return;',
+ it('sendData no longer sending through socket.sendInput fails',()=>violates('input-path',INPUT_FILES.pane,'if (socket.sendInput(current, input)) {','if (socket.submit(current, input, input)) {',
   /^\[input-path\] src\/components\/PaneTerminal\.tsx sendData does not call socket\.sendInput\(pane, input\)$/));
  it('the onData handler not calling sendData fails',()=>violates('input-path',INPUT_FILES.pane,'      sendData(data);\n    });\n    const sendData','      void data;\n    });\n    const sendData',
   /^\[input-path\] src\/components\/PaneTerminal\.tsx term\.onData handler does not call sendData\(data\)/));

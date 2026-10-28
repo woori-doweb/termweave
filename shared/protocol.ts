@@ -46,7 +46,8 @@ export type { Machine, MachineEvent, PaneTarget, SetupJob, SetupRequest, SetupAc
 /** HTTP API
  *  GET    /api/health                    -> { ok: true, herdr: HerdrIdentity (shared/machines.ts; terminal_attach false on a
  *                                          Windows herdr and on a bridge that cannot run the PTY sidecar; terminal_mirror: its
- *                                          terminal lens is the pane's screen, repainted; /api/bridge tells the same herdr), auth: HealthAuth,
+ *                                          terminal lens streams through herdr's session control, or is the pane's screen
+ *                                          repainted where that cannot start; /api/bridge tells the same herdr), auth: HealthAuth,
  *                                          web_ui: { boot_id: string | null, revision: string | null } }
  *  GET    /api/session                   -> { snapshot: SessionSnapshot }
  *  GET    /api/access                    -> RemoteAccess (how a phone can reach this server: what
@@ -482,6 +483,7 @@ export interface PushPayload {
  *  Client -> server frames: attach {pane_id, cols, rows} | detach {pane_id} | input {pane_id, text}
  *    | keys {pane_id, keys} | resize {pane_id, cols, rows} | role {mode}
  *    | pty-ack {pane_id, stream_id, offset} | secret {id, pane_id, prompt, secret}
+ *    | scroll {pane_id, direction, lines, column, row}
  *  Server -> client frames: snapshot | pty-data | pty-exit | pane-geometry | role-ack
  *    | pane-status | pane-exited | session-changed | secret-result | error
  *
@@ -518,6 +520,9 @@ export type ClientMessage =
    * Never queued, retried, sent through agent.prompt, or echoed in a result. */
   | { type: "secret"; id: number; pane_id: string; prompt: string; secret: string }
   | { type: "resize"; pane_id: string; cols: number; rows: number }
+  /** The wheel on a pane whose input-ready said `session`: `lines` lines at a 1-based cell, each in 1..1000.
+   * herdr makes it mouse reports, alternate scroll or its own scrollback; any other pane ignores it. */
+  | { type: "scroll"; pane_id: string; direction: "up" | "down"; lines: number; column: number; row: number }
   /** Cumulative UTF-8 payload bytes processed by xterm, only for this subscription. */
   | { type: "pty-ack"; pane_id: string; stream_id: string; offset: number }
   | { type: "role"; mode: ClientRole };
@@ -527,13 +532,16 @@ export type ServerFeature = "submit" | "secret-input" | "input-ready";
 
 export type ServerMessage =
   | { type: "snapshot"; snapshot: SessionSnapshot; features?: ServerFeature[] }
-  /** raw PTY bytes: append to the terminal, never repaint over it. A mirrored pane (HerdrIdentity.terminal_mirror) sends whole screens the same way. */
+  /** raw PTY bytes: append to the terminal, never repaint over it. A pane session control streams sends herdr's frames,
+   * and a mirrored one (HerdrIdentity.terminal_mirror) whole screens, the same way. */
   | { type: "pty-data"; pane_id: string; data: string; flow?: { stream_id: string; offset: number } }
   | { type: "pty-exit"; pane_id: string; code: number | null }
   /** a pane that waited for another web bridge to let go of its terminal (error `attach_held`) is attached again */
   | { type: "attach-resumed"; pane_id: string }
-  /** Attachment readiness (omitted ready means true); false revokes it during retry. Never a typed-text acknowledgement. */
-  | { type: "input-ready"; pane_id: string; ready?: boolean }
+  /** Attachment readiness (omitted ready means true); false revokes it during retry. Never a typed-text acknowledgement.
+   * `session`: herdr's session control streams the pane (no attach on its PC). Its stream carries no mouse modes and
+   * no scrollback, so the client sends the wheel as `scroll` frames; the grid is still the clients' to drive. */
+  | { type: "input-ready"; pane_id: string; ready?: boolean; session?: true }
   /** the shared pty's grid changed: observe clients adopt it, interact clients drive it. `fixed`: the grid is the pane's own in herdr (a mirrored pane), so every client adopts it and none resizes */
   | { type: "pane-geometry"; pane_id: string; cols: number; rows: number; fixed?: boolean }
   | { type: "role-ack"; mode: ClientRole }

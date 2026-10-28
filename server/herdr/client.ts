@@ -178,7 +178,8 @@ export async function herdrRpc<T = unknown>(
 export async function ping(socketPath?: string): Promise<HerdrIdentity> {
   const result = await herdrRpc<{ version: string; protocol: number; capabilities?: Record<string, unknown> }>("ping", {}, socketPath);
   const attach = terminalAttachSupported(result.capabilities);
-  // without attach the web server repaints the pane's screen instead (server/mirror.ts)
+  // without attach the web server streams the pane through `herdr terminal session control`, or
+  // repaints its screen where that cannot start (server/herdr/terminal-session.ts, server/mirror.ts)
   return { version: result.version, protocol: result.protocol, terminal_attach: attach, ...(attach ? {} : { terminal_mirror: true }) };
 }
 

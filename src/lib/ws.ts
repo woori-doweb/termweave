@@ -271,6 +271,12 @@ export class HerdrSocket {
     try { this.rawSend({ type: "input", pane_id: paneId, text }); return true; } catch { return false; }
   }
 
+  /** The wheel on a pane herdr's session control streams (its input-ready said `session`): `lines` lines at a 1-based cell. */
+  sendScroll(paneId: string, direction: "up" | "down", lines: number, column: number, row: number): boolean {
+    if (!this.canInput(paneId)) return false;
+    try { this.rawSend({ type: "scroll", pane_id: paneId, direction, lines, column, row }); return true; } catch { return false; }
+  }
+
   /**
    * Types a composer message and submits it, straight to the socket: a Ctrl armed on the
    * terminal key bar must not turn a one-letter message into a control key. A server

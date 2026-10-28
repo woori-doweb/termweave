@@ -42,9 +42,26 @@ import { spatialChord } from "../lib/spatialFocus.ts";
 import { OpenFileContext } from "../lib/filePaths.ts";
 import { fileUriPath, terminalFileLinkProvider } from "../lib/terminalFileLinks.ts";
 import { adjustTerminalGlyphs } from "../lib/terminalGlyphs.ts";
+import { DELTA_PIXEL, historyOffset, wheelStep } from "../lib/mirrorScroll.ts";
 
 /** How long a resize must rest before the grid refits and the pty follows it. */
 const RESIZE_SETTLE_MS = 120;
+/** How long a mirrored pane's history position, as herdr last answered it, is moved from without asking again. */
+const MIRROR_HISTORY_FRESH_MS = 1500;
+
+/** Where a mirrored pane's viewport sits in its history, and the wheel's way there (see scrollHistory). */
+interface MirrorHistory {
+  pane: string;
+  offset: number;
+  max: number;
+  /** performance.now() at herdr's last answer; -Infinity until there is one */
+  at: number;
+  /** pixels short of a whole line */
+  pixels: number;
+  /** lines asked for and not sent yet, positive showing older text */
+  older: number;
+  sending: boolean;
+}
 
 export interface PaneTerminalProps {
   /** what the "Terminal ended" banner offers next (the dock passes its terminate button) */
@@ -245,6 +262,10 @@ export function PaneTerminal({
   const observeRef = useRef(role === "observe");
   // a mirrored pane (no terminal attach on its PC): the grid is the pane's own in herdr, adopted like an observer's
   const fixedGridRef = useRef(false);
+  // a pane herdr's session control streams (its input-ready said `session`): the wheel goes to herdr as `scroll` frames
+  const sessionRef = useRef(false);
+  // a mirror's history position, as the wheel and a finger move it (null: none asked for on this pane yet)
+  const historyRef = useRef<MirrorHistory | null>(null);
   // the pty's grid as the server last said it for this pane (pane-geometry), whoever set it
   const sharedGridRef = useRef<{ cols: number; rows: number } | null>(null);
   const [observing, setObserving] = useState(role === "observe");
@@ -460,8 +481,25 @@ export function PaneTerminal({
         dragWheel(event);
         return false;
       }
-      // an adopted grid sends herdr nothing: the wheel is the browser's, and pans the mount
-      if (adopted()) return false;
+      // an adopted grid reports no wheel to herdr: the wheel is the browser's, and pans the mount.
+      // A mirror's wheel past the mount's edge scrolls the pane's history instead (see below).
+      if (adopted()) {
+        if (!mirrorHistory() || event.deltaY === 0 || event.ctrlKey || canPan(event.deltaY)) return false;
+        event.preventDefault();
+        if (term.hasSelection()) term.clearSelection();
+        scrollHistory(event.deltaY, event.deltaMode, wheelSpeedRef.current);
+        return false;
+      }
+      // A session control's stream sets no mouse modes and keeps no scrollback here, so xterm
+      // would report nothing: the wheel goes to herdr itself, which makes it mouse reports,
+      // alternate scroll or its own scrollback as the program wants. A pinch (Ctrl) is the browser's.
+      if (sessionRef.current) {
+        if (event.deltaY === 0 || event.ctrlKey) return false;
+        event.preventDefault();
+        if (term.hasSelection()) term.clearSelection();
+        sessionWheel(event);
+        return false;
+      }
       if (term.hasSelection()) term.clearSelection();
       const reporting = term.modes.mouseTrackingMode !== "none";
       // a trackpad pinch arrives as a wheel with Ctrl down: it is not scrolling, and goes once as before
@@ -601,6 +639,8 @@ export function PaneTerminal({
       d.sending = true;
       const target = d.offset;
       void scrollPane(d.pane, target, machineId).catch(() => {}).finally(() => {
+        // a mirror's wheel moves on from where the drag left the pane, not from where it last scrolled it
+        if (historyRef.current) historyRef.current.at = -Infinity;
         d.sending = false;
         d.sentOffset = target;
         sendScroll(d);
@@ -626,6 +666,84 @@ export function PaneTerminal({
       if (lines === 0) return;
       d.wheelPixels -= lines * lineHeight;
       scrollDrag(d, -lines);
+    };
+
+    // A mirror repaints herdr's visible screen, so herdr's viewport is its history: past the
+    // mount's edge a wheel or a finger scrolls the pane through the API, and the mirror's next
+    // read (at once: the server pokes it) shows the rows it moved to. Typing returns the pane
+    // to the bottom on the server, and another device may scroll it too: a position older than
+    // MIRROR_HISTORY_FRESH_MS is asked for again before it is moved from.
+    /** pixels short of a whole line, carried to the pane's next wheel */
+    let sessionPixels = { pane: null as string | null, carried: 0 };
+    /** Whole lines at the cell under the pointer; a finger's drag comes as an untrusted wheel and moves at speed 1. */
+    const sessionWheel = (event: WheelEvent): void => {
+      const pane = paneRef.current;
+      if (!pane) return;
+      if (sessionPixels.pane !== pane) sessionPixels = { pane, carried: 0 };
+      const lineHeight = (term.element?.querySelector(".xterm-screen")?.getBoundingClientRect().height ?? term.rows) / term.rows;
+      const step = wheelStep(sessionPixels.carried, event.deltaY, event.deltaMode, lineHeight, term.rows, event.isTrusted ? wheelSpeedRef.current : 1);
+      sessionPixels.carried = step.carried;
+      if (step.older === 0) return;
+      const { cell } = cellAt(event);
+      socketRef.current?.sendScroll(pane, step.older > 0 ? "up" : "down", Math.min(1000, Math.abs(step.older)), cell.col + 1, cell.row + 1);
+    };
+
+    /** observers keep their wheel, and an attach grid its mouse reports */
+    const mirrorHistory = (): boolean => fixedGridRef.current && !observeRef.current && paneRef.current !== null;
+    /** whether the mount can still pan that way (a negative delta goes up) */
+    const canPan = (deltaY: number): boolean =>
+      deltaY < 0 ? host.scrollTop > 0 : host.scrollTop < host.scrollHeight - host.clientHeight - 1;
+    const scrollHistory = (deltaY: number, deltaMode: number, speed: number): void => {
+      const pane = paneRef.current;
+      if (!pane) return;
+      // the previous pane's position and carried pixels are not this pane's
+      if (historyRef.current?.pane !== pane) historyRef.current = { pane, offset: 0, max: 0, at: -Infinity, pixels: 0, older: 0, sending: false };
+      const h = historyRef.current;
+      const lineHeight = (term.element?.querySelector(".xterm-screen")?.getBoundingClientRect().height ?? term.rows) / term.rows;
+      const step = wheelStep(h.pixels, deltaY, deltaMode, lineHeight, term.rows, speed);
+      h.pixels = step.carried;
+      if (step.older === 0) return;
+      // a known position keeps the lines asked for within the history: a turn back past its top
+      // or bottom moves at once, not after the lines that went nowhere
+      h.older = performance.now() - h.at > MIRROR_HISTORY_FRESH_MS
+        ? h.older + step.older
+        : historyOffset(h.offset, h.older + step.older, h.max) - h.offset;
+      // the view stays where the history was reached from: following the cursor would pan it away
+      panned = true;
+      sendHistory(h);
+    };
+    /** one request at a time; lines asked for meanwhile go with the next */
+    const sendHistory = (h: MirrorHistory): void => {
+      if (h.sending || h.older === 0 || historyRef.current !== h || disposed) return;
+      h.sending = true;
+      void (async () => {
+        if (performance.now() - h.at > MIRROR_HISTORY_FRESH_MS) {
+          const scroll = await fetchPaneScroll(h.pane, machineId);
+          // herdr reports no history for the pane: there is nothing to scroll
+          if (!scroll) { h.older = 0; return; }
+          h.offset = scroll.offset_from_bottom;
+          h.max = scroll.max_offset_from_bottom;
+          h.at = performance.now();
+        }
+        const target = historyOffset(h.offset, h.older, h.max);
+        h.older = 0;
+        if (target === h.offset) return;
+        // where the lines asked for meanwhile count from
+        h.offset = target;
+        const scroll = await scrollPane(h.pane, target, machineId);
+        if (scroll) {
+          h.offset = scroll.offset_from_bottom;
+          h.max = scroll.max_offset_from_bottom;
+          h.at = performance.now();
+        } else h.at = -Infinity;
+      })().catch(() => {
+        // nothing to retry: the next wheel asks herdr where the pane is
+        h.older = 0;
+        h.at = -Infinity;
+      }).finally(() => {
+        h.sending = false;
+        sendHistory(h);
+      });
     };
     const stopEdge = (): void => {
       if (edgeTimer !== null) window.clearInterval(edgeTimer);
@@ -813,6 +931,8 @@ export function PaneTerminal({
           acknowledge?.();
           wrote(owner, generation);
         });
+      } else if (message.type === "input-ready") {
+        if (message.pane_id === paneRef.current && message.ready !== false) sessionRef.current = message.session === true;
       } else if (message.type === "attach-resumed") {
         if (message.pane_id === paneRef.current) {
           setHeld(false);
@@ -844,7 +964,8 @@ export function PaneTerminal({
         // observe clients adopt the pty's grid; interact clients drive it and ignore this,
         // unless the grid is fixed: then nobody here drives it
         if (message.pane_id !== paneRef.current) return;
-        if (message.fixed) fixedGridRef.current = true;
+        // a pane whose session control did not start is mirrored: its wheel goes the mirror's way
+        if (message.fixed) { fixedGridRef.current = true; sessionRef.current = false; }
         // kept while the terminal lens ignores it: another device may drive the grid, and the
         // chat lens entered later must draw its hidden screen for that grid, not this device's
         sharedGridRef.current = { cols: message.cols, rows: message.rows };
@@ -956,7 +1077,11 @@ export function PaneTerminal({
         setCtrlArmed(false);
         input = controlCode(data) ?? data;
       }
-      if (socket.sendInput(current, input)) return;
+      if (socket.sendInput(current, input)) {
+        // the server returns a scrolled mirror to the bottom before the input: the next wheel asks again
+        if (historyRef.current) historyRef.current.at = -Infinity;
+        return;
+      }
       // A closed socket, an attachment still opening, or a failed synchronous send:
       // keep printable input for explicit review, never replay it automatically.
       if (draftPaneRef.current !== current) {
@@ -1055,12 +1180,14 @@ export function PaneTerminal({
     // Touch screens never emit wheel events and xterm.js has no touch scrolling:
     // translate a single-finger drag on the terminal into wheel events, so the
     // normal buffer scrolls its own viewport and the alternate buffer (with mouse
-    // reporting on) forwards the gesture to herdr, exactly like a mouse wheel.
+    // reporting on) forwards the gesture to herdr, exactly like a mouse wheel; a pane herdr's
+    // session control streams sends it to herdr as scroll frames (sessionWheel).
     // The text follows the finger, as everywhere on a phone: dragging down brings
     // older lines in. Each event carries the finger's position, since xterm reports
     // a wheel at the cell under it (without one, every report said row 1, column 1).
-    // An adopted grid has no history to send a wheel to (an observer's reports are dropped, a
-    // mirror reports nothing): there the drag pans the mount, both ways, to the cells past its edge.
+    // An adopted grid sends herdr no wheel (an observer's reports are dropped, a mirror reports
+    // nothing): there the drag pans the mount, both ways, to the cells past its edge, and on a
+    // mirror a drag the mount cannot follow further up or down scrolls the pane's history.
     let touchX = 0;
     let touchY = 0;
     let tracking = false;
@@ -1084,7 +1211,9 @@ export function PaneTerminal({
       touchY = first.clientY;
       if (adopted()) {
         panned = true;
+        const pastEdge = delta !== 0 && mirrorHistory() && !canPan(delta);
         host.scrollBy(across, delta);
+        if (pastEdge) scrollHistory(delta, DELTA_PIXEL, 1);
         return;
       }
       if (delta !== 0) {
@@ -1244,6 +1373,8 @@ export function PaneTerminal({
     setHeld(false);
     setUnsupported(false);
     fixedGridRef.current = false;
+    sessionRef.current = false;
+    historyRef.current = null;
     sharedGridRef.current = null;
     // the next pane's grid is this browser's again unless it says otherwise (pane-geometry)
     hostRef.current?.toggleAttribute("data-adopted-grid", observeRef.current);

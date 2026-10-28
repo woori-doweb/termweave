@@ -31,11 +31,17 @@ export function mirrorKeys(text: string, platform: NodeJS.Platform = process.pla
   return platform === "win32" && text === "\x1b" ? ["esc"] : null;
 }
 
+/**
+ * Whether `text` is a pasted block mirrorInput may wrap. Typing is one key per frame: only a
+ * paste has a line break with more text after it, and a terminal that knew the mode has wrapped
+ * it already. herdr's session control carries no modes either, so its panes are shaped the same.
+ */
+export function pastedBlock(text: string): boolean {
+  return /[\r\n][^\r\n]/.test(text) && !text.includes(PASTE_START) && !text.includes(PASTE_END);
+}
+
 export async function mirrorInput(text: string, paneAgent: () => Promise<string | null>): Promise<string> {
-  // typing is one key per frame: only a paste has a line break with more text after it
-  if (!/[\r\n][^\r\n]/.test(text)) return text;
-  // a terminal that knew the mode has wrapped it already
-  if (text.includes(PASTE_START) || text.includes(PASTE_END)) return text;
+  if (!pastedBlock(text)) return text;
   let agent: string | null;
   try {
     agent = await paneAgent();

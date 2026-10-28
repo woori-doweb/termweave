@@ -30,14 +30,19 @@ export interface Machine {
  * The herdr behind a PC, as its bridge can serve it. terminal_attach is false on a Windows
  * host: herdr has no `terminal attach` there yet (herdrdev/herdr#4821), and it is false on
  * any bridge whose runtime cannot run the PTY sidecar (the win32 bundle ships none). Such a
- * PC's panes have the chat lens and a mirrored terminal (terminal_mirror). Absent on older
- * bridges, which are never Windows.
+ * PC's panes have the chat lens and a terminal lens without attach (terminal_mirror). Absent on
+ * older bridges, which are never Windows.
  */
 export interface HerdrIdentity {
   version: string;
   protocol: number;
   terminal_attach?: boolean;
-  /** without attach, the terminal lens shows the pane's screen repainted a few times a second (server/mirror.ts) */
+  /**
+   * without attach the terminal lens still exists: herdr's session control streams each pane
+   * (server/herdr/terminal-session.ts; its input-ready says `session`), and a pane where that
+   * cannot start shows its screen repainted a few times a second (server/mirror.ts). Which one a
+   * pane got is told per pane, not here: the fallback is decided as it is attached.
+   */
   terminal_mirror?: boolean;
 }
 export type MachineAction = "update_bridge" | "setup";
