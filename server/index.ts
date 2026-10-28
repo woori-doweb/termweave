@@ -13,9 +13,10 @@ import { homedir } from "node:os";
 import { join, resolve, isAbsolute } from "node:path";
 import type { ServerWebSocket } from "bun";
 
-import type { AgentKind, AgentStatus, ClientMessage, ClientRole, HealthAuth, HerdrPane, ServerFeature, ServerMessage, SessionSnapshot } from "../shared/protocol.ts";
+import type { AgentKind, AgentStatus, ClientMessage, ClientRole, HealthAuth, HerdrPane, OpenUrlRequest, OpenUrlTargets, ServerFeature, ServerMessage, SessionSnapshot } from "../shared/protocol.ts";
 import { paneTitle } from "../shared/notify-policy.ts";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
+import { asideExecutable, openInAside, OpenUrlError, parseOpenUrl } from "./open-url.ts";
 import { DEVICE_COOKIE, handleAuthRequest, isAuthenticated, parseCookies, requiresAuth, unauthorizedJson } from "./auth.ts";
 import { cameThroughProxy, decideAccess, isLoopbackAddress } from "./access.ts";
 import { DeviceStore, handleDeviceRequest } from "./devices.ts";
@@ -1267,6 +1268,32 @@ export function createServer(
       if (pathname === "/api/access") {
         if (request.method !== "GET") return badRequest("method_not_allowed", "use GET");
         return jsonResponse(await remoteAccess(bunServer.port ?? DEFAULT_PORT), 200, { "cache-control": "no-store" });
+      }
+
+      // A link opens on the PC the person sits at: only a request from this PC itself, never one
+      // forwarded from another PC (not in machine-api.ts's allow-list) or through a proxy.
+      if (pathname === "/api/open-url") {
+        const local = ip !== null && isLoopbackAddress(ip.address) && !cameThroughProxy(request.headers);
+        if (request.method === "GET") return jsonResponse({ aside: local && asideExecutable() !== null } satisfies OpenUrlTargets, 200, { "cache-control": "no-store" });
+        if (request.method !== "POST") return badRequest("method_not_allowed", "use GET or POST");
+        // the device routes' mutation guard: same origin (checked above) plus the app's own header
+        if (request.headers.get("x-herdr-machine") !== "1") return jsonResponse({ error: { code: "invalid_origin", message: "Open links from this app" } }, 403);
+        if (!local) return jsonResponse({ error: { code: "loopback_only", message: "links open only on this PC itself" } }, 403);
+        let payload: Partial<Record<keyof OpenUrlRequest, unknown>>;
+        try { payload = (await boundedJson(request, 16 * 1024)) as typeof payload; } catch { return badRequest("invalid_json", "request body must be JSON of at most 16 KB"); }
+        if (!isJsonObject(payload)) return badRequest("invalid_body", "request body must be a JSON object");
+        if (payload.target !== "aside") return badRequest("invalid_target", "target must be aside");
+        let target: string;
+        try { target = parseOpenUrl(payload.url); } catch (error) {
+          if (error instanceof OpenUrlError) return badRequest(error.code, error.message);
+          throw error;
+        }
+        const exe = asideExecutable();
+        if (exe === null) return jsonResponse({ error: { code: "aside_not_installed", message: "Aside is not installed on this PC" } }, 404);
+        try { await openInAside(exe, target); } catch (error) {
+          return jsonResponse({ error: { code: "open_failed", message: error instanceof Error ? error.message : "Aside did not start" } }, 500);
+        }
+        return new Response(null, { status: 204 });
       }
 
       if (pathname.startsWith("/api/panes/by-number/")) {

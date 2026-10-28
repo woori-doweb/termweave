@@ -23,6 +23,8 @@ export type Palette = "amber" | "report" | "charcoal";
 export type UsagePlacement = "footer" | "top";
 /** the lens a pane opens in until it is switched there: auto is chat for an agent on a touch screen, else terminal */
 export type DefaultView = "auto" | "chat" | "terminal";
+/** where a terminal's web link opens: browser is a new tab here; aside is the Aside browser of the server's PC */
+export type WebLinkTarget = "browser" | "aside";
 
 import { sanitizeShortcutOverrides, type ShortcutOverrides } from "./shortcutBindings.ts";
 
@@ -46,6 +48,8 @@ export interface Settings {
   terminalLineHeight: number;
   /** fonts tried before the built-in terminal stack, as a CSS font-family list; "" keeps the built-in one */
   terminalFontFamily: string;
+  /** where a terminal's web link opens: a new tab of this browser, or Aside on the server's PC (POST /api/open-url) */
+  webLinkTarget: WebLinkTarget;
   /** chat text size in px (its body text; the rest scales with it); null follows the density */
   chatFontSize: number | null;
   /** fonts tried before the UI font in the chat's prose (code stays mono), as a CSS font-family list; "" keeps the UI font */
@@ -101,6 +105,7 @@ export const DEFAULT_SETTINGS: Settings = {
   terminalWheelSpeed: 1,
   terminalLineHeight: 1,
   terminalFontFamily: "",
+  webLinkTarget: "browser",
   chatFontSize: null,
   chatFontFamily: "",
   enterSends: true,
@@ -195,6 +200,7 @@ export function sanitizeSettings(raw: unknown): Settings {
       ? Math.min(CHAT_FONT_MAX, Math.max(CHAT_FONT_MIN, Math.round(chatFont)))
       : DEFAULT_SETTINGS.chatFontSize,
     terminalFontFamily: sanitizeFontFamily(record["terminalFontFamily"]),
+    webLinkTarget: record["webLinkTarget"] === "browser" || record["webLinkTarget"] === "aside" ? record["webLinkTarget"] : DEFAULT_SETTINGS.webLinkTarget,
     chatFontFamily: sanitizeFontFamily(record["chatFontFamily"]),
     enterSends: typeof record["enterSends"] === "boolean" ? record["enterSends"] : DEFAULT_SETTINGS.enterSends,
     showThinking: typeof record["showThinking"] === "boolean" ? record["showThinking"] : DEFAULT_SETTINGS.showThinking,

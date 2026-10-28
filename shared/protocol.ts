@@ -108,6 +108,10 @@ export type { Machine, MachineEvent, PaneTarget, SetupJob, SetupRequest, SetupAc
  *         herdr refuses)
  *  POST   /api/worktree/remove  { workspace_id, force? } -> { ok: true } (closes the workspace and deletes
  *         its checkout, the branch stays; 409 dirty_worktree_requires_force on a dirty checkout without force)
+ *  GET    /api/open-url                  -> OpenUrlTargets (Aside is offered only to a request from this PC itself)
+ *  POST   /api/open-url { url, target: "aside" } -> 204 (opens the http(s) address in the Aside browser of this PC;
+ *         403 loopback_only unless the request comes from this PC with no proxy in front, 400 invalid_url /
+ *         invalid_target, 404 aside_not_installed, 500 open_failed; never forwarded to another PC)
  *  POST   /api/auth        { token }     -> 204 + Set-Cookie herdr_web_token (401 invalid_token on mismatch)
  *  DELETE /api/auth                      -> 204, clears the token and the device cookies
  *  GET    /api/devices                   -> { devices: PairedDevice[] } (the paired devices; `current` marks the caller's)
@@ -448,6 +452,17 @@ export interface WorktreeCreated {
 export interface WorktreeRemoveRequest {
   workspace_id: string;
   force?: boolean;
+}
+
+/** POST /api/open-url: an absolute http(s) address opened in a browser of the PC the request comes from. */
+export interface OpenUrlRequest {
+  url: string;
+  target: "aside";
+}
+
+/** GET /api/open-url: the browsers this PC can open a link in for the caller (only a request from this PC itself). */
+export interface OpenUrlTargets {
+  aside: boolean;
 }
 
 /** GET /api/pane/commands: one slash command the pane's agent understands. */

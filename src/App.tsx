@@ -856,6 +856,7 @@ export function App() {
             terminalWheelSpeed: settings.terminalWheelSpeed,
             terminalLineHeight: settings.terminalLineHeight,
             terminalFontFamily: settings.terminalFontFamily,
+            webLinkTarget: settings.webLinkTarget,
             theme: resolvedTheme,
             palette: settings.palette,
             role,

@@ -30,6 +30,16 @@ it("keeps the terminal line height at xterm's own spacing unless chosen, bounded
   expect(sanitizeSettings({ terminalLineHeight: "1.5" }).terminalLineHeight).toBe(1);
 });
 
+it("opens web links in this browser unless Aside is chosen, and accepts no other target", () => {
+  expect(DEFAULT_SETTINGS.webLinkTarget).toBe("browser");
+  expect(sanitizeSettings({}).webLinkTarget).toBe("browser");
+  expect(sanitizeSettings({ webLinkTarget: "browser" }).webLinkTarget).toBe("browser");
+  expect(sanitizeSettings({ webLinkTarget: "aside" }).webLinkTarget).toBe("aside");
+  for (const webLinkTarget of [null, true, 1, "Aside", "chrome", ""]) {
+    expect(sanitizeSettings({ webLinkTarget }).webLinkTarget).toBe("browser");
+  }
+});
+
 it("defaults legacy records to workspace grouping and accepts only supported modes", () => {
   expect(sanitizeSettings({}).sidebarGrouping).toBe("workspace");
   expect(sanitizeSettings({ sidebarGrouping: "workspace" }).sidebarGrouping).toBe("workspace");

@@ -15,7 +15,7 @@ import { EMPTY_DRAFT, applyToDraft, draftIsEmpty, type InputDraft } from "../lib
 import { messageQueues } from "../lib/messageQueue.ts";
 import { MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, composerMessage, composerPayload, submitNote } from "../lib/compose.ts";
 import { answerFromText, answerHint, answerRefusal, needsConfirmation, type TypedAnswer } from "../lib/promptAnswer.ts";
-import { ApiError, fetchPaneScroll, fetchPaneSelection, scrollPane } from "../lib/api.ts";
+import { ApiError, fetchPaneScroll, fetchPaneSelection, openUrlInAside, scrollPane } from "../lib/api.ts";
 import { parseOsc52 } from "../lib/osc52.ts";
 import { matchHerdrWidths } from "../lib/terminalWidths.ts";
 import { useMachineApi, useMachineId } from "../lib/machineContext.tsx";
@@ -29,7 +29,7 @@ import { RenderBoundary } from "./RenderBoundary.tsx";
 import { Composer } from "./Composer.tsx";
 import type { AgentStatus, ClientRole, ConversationMetadata, InteractivePrompt, ServerMessage } from "../../shared/protocol.ts";
 import type { PaneView } from "../lib/actions.ts";
-import { useSettings, terminalTheme, terminalContrast, type Palette, type ResolvedTheme } from "../lib/settings.ts";
+import { useSettings, terminalTheme, terminalContrast, type Palette, type ResolvedTheme, type WebLinkTarget } from "../lib/settings.ts";
 import { imeEdit, imeSpaces } from "../lib/imeDiff.ts";
 import {
   COMPOSITION_IDLE, COMPOSITION_SETTLE_MS, MIRROR_INPUT_IDLE, compositionSettled, filterMirrorInput, flushMirrorInput, type CompositionPhase,
@@ -91,6 +91,8 @@ export interface PaneTerminalProps {
   terminalLineHeight: number;
   /** fonts tried before the built-in stack (settings); "" keeps the built-in one */
   terminalFontFamily: string;
+  /** where a web link in the terminal opens (settings): a new tab here, or Aside on the server's PC */
+  webLinkTarget: WebLinkTarget;
   /** the resolved UI theme: the xterm theme object mirrors it */
   theme: ResolvedTheme;
   /** the chrome palette (settings.ts): the terminal cursor and selection follow it */
@@ -139,6 +141,7 @@ export function PaneTerminal({
   terminalWheelSpeed,
   terminalLineHeight,
   terminalFontFamily,
+  webLinkTarget,
   theme,
   palette,
   role = "interact",
@@ -174,6 +177,15 @@ export function PaneTerminal({
   const [inputError, setInputError] = useState<string | null>(null);
   const [inputReady, setInputReady] = useState(false);
   const [outputError, setOutputError] = useState<string | null>(null);
+  // a web link Aside did not open: said until dismissed, the link is never opened here instead
+  const [linkError, setLinkError] = useState<string | null>(null);
+  /** read by the link handlers, which are made once for the terminal's life: the current setting and language */
+  const openWebLinkRef = useRef<(uri: string) => void>(() => {});
+  openWebLinkRef.current = (uri) => {
+    if (webLinkTarget === "browser") { window.open(uri, "_blank", "noopener,noreferrer"); return; }
+    setLinkError(null);
+    openUrlInAside(uri).catch((error: unknown) => setLinkError(t("Could not open the link in Aside: {error}", { error: error instanceof Error ? error.message : String(error) })));
+  };
   // the server answered terminal_unsupported (a bridge too old to mirror): the lens is a notice, the chat still works
   const [unsupported, setUnsupported] = useState(false);
   // another web bridge has this pane's terminal: the server waits for it and says attach-resumed
@@ -394,7 +406,7 @@ export function PaneTerminal({
           if (!linkPressed(event)) return;
           const path = fileUriPath(uri);
           if (path !== null) openFileRef.current?.(path);
-          else if (/^https?:\/\//i.test(uri)) window.open(uri, "_blank", "noopener,noreferrer");
+          else if (/^https?:\/\//i.test(uri)) openWebLinkRef.current(uri);
         },
         allowNonHttpProtocols: true,
       },
@@ -405,7 +417,7 @@ export function PaneTerminal({
     term.loadAddon(fit);
     matchHerdrWidths(term);
     // an address in the terminal opens in a new tab; the page never navigates away from the pane
-    term.loadAddon(new WebLinksAddon((_event, uri) => { window.open(uri, "_blank", "noopener,noreferrer"); }));
+    term.loadAddon(new WebLinksAddon((_event, uri) => { openWebLinkRef.current(uri); }));
     term.registerLinkProvider(terminalFileLinkProvider(() => term.buffer.active, (path, event) => { if (linkPressed(event)) openFileRef.current?.(path); }));
     term.open(host);
     const compositionStart = () => setComposing(true);
@@ -1370,6 +1382,7 @@ export function PaneTerminal({
     setEnded(false);
     setInputReady(false);
     setInputError(null);
+    setLinkError(null);
     // the previous pane's IME span and the recoveries waiting on it are not this pane's
     setComposing(false);
     settleComposition(false);
@@ -1647,6 +1660,7 @@ export function PaneTerminal({
           </div>
         )}
         {!chatView && inputError && <div className="terminal-banner" role="status">{inputError}<button className="btn" onClick={() => setInputError(null)}>{t("Dismiss")}</button></div>}
+        {!chatView && linkError && <div className="terminal-banner" role="status">{linkError}<button className="btn" onClick={() => setLinkError(null)}>{t("Dismiss")}</button></div>}
         {!chatView && !observing && connected && !inputReady && !held && !ended && <div className="terminal-banner" role="status">{t("Waiting for terminal input…")}</div>}
         {/* the chat lens says these itself (ChatView), inline; the pills are the grid's */}
         {paneId !== null && !chatView && ended && !outputError && (

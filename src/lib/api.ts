@@ -8,6 +8,8 @@ import type {
   HealthAuth,
   InteractivePrompt,
   OmoActivity,
+  OpenUrlRequest,
+  OpenUrlTargets,
   PairedDevice,
   PairingCode,
   PaneReadResult,
@@ -212,6 +214,16 @@ export async function renameDevice(id: string, label: string): Promise<PairedDev
 
 export async function revokeDevice(id: string): Promise<void> {
   await sendJson(`/api/devices/${encodeURIComponent(id)}`, "DELETE", {});
+}
+
+/** GET /api/open-url: whether this PC can open a link in Aside for this browser (it must run on the PC itself). */
+export function fetchOpenUrlTargets(): Promise<OpenUrlTargets> {
+  return getJson<OpenUrlTargets>("/api/open-url");
+}
+
+/** POST /api/open-url: a web link opened in Aside on this PC; ApiError 404 aside_not_installed, 403 loopback_only. */
+export async function openUrlInAside(url: string): Promise<void> {
+  await sendJson("/api/open-url", "POST", { url, target: "aside" } satisfies OpenUrlRequest);
 }
 
 /** DELETE /api/auth: clears the session and device cookies, so the next health check reports the gate again. */

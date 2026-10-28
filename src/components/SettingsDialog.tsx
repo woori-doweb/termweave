@@ -16,9 +16,9 @@ import { LANGUAGE_NAMES, LANGUAGE_SETTINGS, useT } from "../lib/i18n.ts";
 import { FONT_FAMILY_MAX_CHARS, sanitizeFontFamily } from "../lib/fontFamily.ts";
 import type { UpdatesModel } from "../lib/updates.ts";
 import type { MachineSettings } from "../../shared/machines.ts";
-import { fetchRemoteAccess, fetchVoiceStatus, machineRequest, saveVoiceConfig } from "../lib/api.ts";
+import { fetchOpenUrlTargets, fetchRemoteAccess, fetchVoiceStatus, machineRequest, saveVoiceConfig } from "../lib/api.ts";
 import { isLoopbackHost, phonePlan } from "../lib/phone.ts";
-import type { HealthAuth, ProviderUsage, RemoteAccess } from "../../shared/protocol.ts";
+import type { HealthAuth, OpenUrlTargets, ProviderUsage, RemoteAccess } from "../../shared/protocol.ts";
 import type { VoiceStatus } from "../../shared/voice.ts";
 import { VOICE_CONFIG_EVENT } from "../lib/voice.ts";
 import { moveInOrder, orderProviders, PROVIDER_MARK, PROVIDER_NAME, usageName, useUsage } from "../lib/usage.ts";
@@ -219,6 +219,11 @@ export function SettingsDialog({ open, onClose, actions, updates, auth, onEnable
   const [micDenied, setMicDenied] = useState(false);
   useEffect(() => {
     if (open) fetchVoiceStatus().then(setVoice, () => setVoice(null));
+  }, [open]);
+  // Aside is offered only where the server can open it: installed on its PC, asked from that PC itself
+  const [linkTargets, setLinkTargets] = useState<OpenUrlTargets | null>(null);
+  useEffect(() => {
+    if (open) fetchOpenUrlTargets().then(setLinkTargets, () => setLinkTargets({ aside: false }));
   }, [open]);
   /** ask now, so the first dictation does not stop at the browser's permission prompt */
   const toggleVoiceInput = async (voiceInput: boolean) => {
@@ -470,6 +475,16 @@ export function SettingsDialog({ open, onClose, actions, updates, auth, onEnable
                   <select id="terminal-input-mode" className="input settings-select" value={settings.terminalInputMode} onChange={(event) => update({ terminalInputMode: event.target.value as "auto" | "line" | "direct" })}>
                     <option value="auto">{t("Automatic")}</option><option value="line">{t("Input line")}</option><option value="direct">{t("Direct typing")}</option>
                   </select>
+                </div>
+                <div className="settings-row">
+                  <div><span className="settings-label">{t("Open web links in")}</span>{linkTargets?.aside === false && <span className="settings-description">{t("Aside opens links only in a browser on this server's PC, with Aside installed there")}</span>}</div>
+                  <div className="segmented" aria-label={t("Open web links in")}>
+                    {(["browser", "aside"] as const).map((webLinkTarget) => (
+                      <button key={webLinkTarget} type="button" aria-pressed={settings.webLinkTarget === webLinkTarget} disabled={webLinkTarget === "aside" && linkTargets?.aside !== true} onClick={() => update({ webLinkTarget })}>
+                        {webLinkTarget === "browser" ? t("This browser") : "Aside"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </section>
