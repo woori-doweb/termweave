@@ -99,9 +99,13 @@ export type { Machine, MachineEvent, PaneTarget, SetupJob, SetupRequest, SetupAc
  *  POST   /api/workspace/rename { workspace_id, label } -> { ok: true }
  *  POST   /api/workspace/move   { workspace_id, insert_index } -> { ok: true } (sidebar reorder)
  *  POST   /api/workspace/close  { workspace_id } -> { ok: true }
+ *  GET    /api/worktree/source?pane_id= -> WorktreeSource (the checkout, repo and branch of the pane's
+ *         folder; 400 missing_pane_id / pane_not_found, 409 not_a_git_repository)
  *  POST   /api/worktree/create  { pane_id, branch, base? } -> WorktreeCreated (worktree.create from the
- *         pane's folder, labelled with the branch, then placed right after the pane's workspace;
- *         400 missing_branch / pane_not_found, 409 with herdr's code when herdr refuses)
+ *         pane's repo (its main checkout, also for a pane in a linked worktree), based on `base` or else
+ *         the pane's branch or commit, labelled with the branch, then placed right after the pane's
+ *         workspace; 400 missing_branch / pane_not_found, 409 not_a_git_repository or herdr's code when
+ *         herdr refuses)
  *  POST   /api/worktree/remove  { workspace_id, force? } -> { ok: true } (closes the workspace and deletes
  *         its checkout, the branch stays; 409 dirty_worktree_requires_force on a dirty checkout without force)
  *  POST   /api/auth        { token }     -> 204 + Set-Cookie herdr_web_token (401 invalid_token on mismatch)
@@ -407,7 +411,25 @@ export interface WorkspaceCreated {
   error?: { code: string; message: string };
 }
 
-/** POST /api/worktree/create: a git worktree of the pane's repo; blank or null `base` branches from HEAD. */
+/** GET /api/worktree/source: where a worktree made from the pane starts. */
+export interface WorktreeSource {
+  pane_id: string;
+  /** the pane's folder */
+  cwd: string;
+  /** the checkout the folder sits in: the main one or a linked worktree */
+  checkout_root: string;
+  /** the main checkout, where herdr makes the worktree from */
+  repo_root: string;
+  repo_name: string;
+  /** null when HEAD is detached */
+  branch: string | null;
+  /** HEAD's short commit */
+  head: string;
+  /** the folder is in a linked worktree, not the main checkout */
+  linked: boolean;
+}
+
+/** POST /api/worktree/create: a git worktree of the pane's repo; blank or null `base` branches from the pane's branch or commit. */
 export interface WorktreeCreateRequest {
   pane_id: string;
   branch: string;

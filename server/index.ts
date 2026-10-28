@@ -57,7 +57,7 @@ import {
   workspaceRename,
   worktreeCreate,
   worktreeRemove, PANE_GONE_CODES } from "./herdr/client.ts";
-import { parseWorktreeCreate, worktreeFailure } from "./worktree.ts";
+import { parseWorktreeCreate, resolveWorktreeSource, worktreeFailure } from "./worktree.ts";
 import { type AlertTiming, createPushService, defaultStateDir, handlePushRequest } from "./push.ts";
 import { codexQuestionsCollapsed, handlePromptRequest } from "./prompt.ts";
 import { secretPrompt, validSecret } from "../shared/secret-prompt.ts";
@@ -1421,6 +1421,21 @@ export function createServer(
         }
       }
 
+      if (pathname === "/api/worktree/source") {
+        if (request.method !== "GET") return badRequest("method_not_allowed", "use GET");
+        const paneId = url.searchParams.get("pane_id")?.trim();
+        if (!paneId) return badRequest("missing_pane_id", "pane_id query parameter is required");
+        try {
+          const pane = (await sessionSnapshot()).panes.find((candidate) => candidate.pane_id === paneId);
+          if (!pane) return badRequest("pane_not_found", `pane ${paneId} not found`);
+          const cwd = pane.foreground_cwd ?? pane.cwd;
+          if (!cwd) return badRequest("cwd_not_found", `pane ${paneId} has no working directory`);
+          return jsonResponse(await resolveWorktreeSource(paneId, cwd));
+        } catch (error) {
+          return worktreeFailure(error);
+        }
+      }
+
       if (pathname === "/api/worktree/create") {
         if (request.method !== "POST") return badRequest("method_not_allowed", "use POST");
         let payload: unknown;
@@ -1438,7 +1453,10 @@ export function createServer(
           if (!pane) return badRequest("pane_not_found", `pane ${paneId} not found`);
           const cwd = pane.foreground_cwd ?? pane.cwd;
           if (!cwd) return badRequest("cwd_not_found", `pane ${paneId} has no working directory`);
-          const created = await worktreeCreate({ cwd, branch, ...(base === undefined ? {} : { base }), label: branch });
+          // herdr refuses a linked worktree's folder (`linked_worktree_source`): the worktree is made
+          // from the main checkout, based on the pane's own branch unless the request names one
+          const source = await resolveWorktreeSource(paneId, cwd);
+          const created = await worktreeCreate({ cwd: source.repo_root, branch, base: base ?? source.branch ?? source.head, label: branch });
           // herdr appends the new workspace: the sidebar shows it right under the terminal's own
           const sourceIndex = snapshot.workspaces.findIndex((workspace) => workspace.workspace_id === pane.workspace_id);
           if (sourceIndex >= 0) {

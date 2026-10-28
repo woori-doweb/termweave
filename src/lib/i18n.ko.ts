@@ -240,6 +240,13 @@ export const KO: Record<string, string> = {
   "Branch name": "브랜치 이름",
   "Base (optional)": "기준 (선택)",
   "Current branch": "현재 브랜치",
+  "Reading the terminal's branch…": "터미널의 브랜치를 읽는 중…",
+  "From terminal {pane}": "출발 터미널 {pane}",
+  "Folder {path}": "폴더 {path}",
+  "Current branch {branch} ({head})": "현재 브랜치 {branch} ({head})",
+  "Detached at {head}": "{head}에서 분리된 HEAD",
+  "This terminal is in a worktree of {repo}: the new worktree is made from the repo, based on {branch}.": "이 터미널은 {repo}의 워크트리 안에 있습니다: 새 워크트리는 리포에서 만들고 {branch}를 기준으로 합니다.",
+  "This terminal's folder is not in a git repository.": "이 터미널의 폴더는 git 리포지토리가 아닙니다.",
   "Creates a git worktree from this terminal's folder and opens a shell there as a new workspace. Untracked files such as node_modules or .env are not copied.": "이 터미널의 폴더에서 git 워크트리를 만들고, 그곳의 셸을 새 워크스페이스로 엽니다. node_modules나 .env 같은 추적되지 않는 파일은 복사되지 않습니다.",
   "Create": "만들기",
 

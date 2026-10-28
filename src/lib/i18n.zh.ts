@@ -239,6 +239,13 @@ export const ZH: Record<string, string> = {
   "Branch name": "分支名称",
   "Base (optional)": "基准 (可选)",
   "Current branch": "当前分支",
+  "Reading the terminal's branch…": "正在读取终端的分支…",
+  "From terminal {pane}": "来源终端 {pane}",
+  "Folder {path}": "文件夹 {path}",
+  "Current branch {branch} ({head})": "当前分支 {branch} ({head})",
+  "Detached at {head}": "分离于 {head} 的 HEAD",
+  "This terminal is in a worktree of {repo}: the new worktree is made from the repo, based on {branch}.": "此终端位于 {repo} 的工作树中：新工作树将从仓库创建，并以 {branch} 为基准。",
+  "This terminal's folder is not in a git repository.": "此终端的文件夹不在 git 仓库中。",
   "Creates a git worktree from this terminal's folder and opens a shell there as a new workspace. Untracked files such as node_modules or .env are not copied.": "从此终端的文件夹创建 git 工作树，并在其中打开一个 shell 作为新工作区。node_modules 或 .env 等未跟踪的文件不会被复制。",
   "Create": "创建",
 

@@ -21,6 +21,7 @@ import type {
   WorktreeCreated,
   WorktreeCreateRequest,
   WorktreeRemoveRequest,
+  WorktreeSource,
 } from "../../shared/protocol.ts";
 import type { PaneScrollInfo } from "../../shared/herdr-api.generated.ts";
 import type { HerdrUpdateStatus, UpdateCommand, UpdateStatus } from "../../shared/update.ts";
@@ -382,7 +383,12 @@ export async function closeWorkspace(workspaceId: string, machineId = "local"): 
   await sendJson(machinePath(machineId, "workspace/close"), "POST", { workspace_id: workspaceId });
 }
 
-/** POST /api/worktree/create: a new workspace on a git worktree of the pane's folder, placed right after the pane's workspace. */
+/** GET /api/worktree/source: the checkout, repo and branch of the pane's folder; 409 not_a_git_repository outside a repo. */
+export function fetchWorktreeSource(paneId: string, machineId = "local"): Promise<WorktreeSource> {
+  return getJson<WorktreeSource>(machinePath(machineId, `worktree/source?pane_id=${encodeURIComponent(paneId)}`));
+}
+
+/** POST /api/worktree/create: a new workspace on a git worktree of the pane's repo, placed right after the pane's workspace. */
 export async function createWorktreePane(request: WorktreeCreateRequest, machineId = "local"): Promise<WorktreeCreated> {
   const response = await sendJson(machinePath(machineId, "worktree/create"), "POST", request);
   return (await response.json()) as WorktreeCreated;

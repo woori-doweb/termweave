@@ -1,10 +1,70 @@
 /**
  * /api/worktree/*: a terminal's "new terminal in a worktree" and its removal. herdr makes the
- * git worktree from the pane's folder; a branch and pane are required, a base is optional (null
- * or blank: herdr branches from the current HEAD).
+ * git worktree from the repo of the pane's folder; a branch and pane are required, a base is
+ * optional (null or blank: the branch, or the commit, the pane's checkout is on).
  */
+import { basename, dirname, resolve } from "node:path";
+import type { WorktreeSource } from "../shared/protocol.ts";
 import { HerdrError } from "./herdr/client.ts";
 import { errorResponse, isJsonObject, jsonResponse } from "./http.ts";
+
+const GIT_TIMEOUT_MS = 5_000;
+
+/** What `git rev-parse` answers in the pane's folder, one line per question. */
+export interface WorktreeGitLines {
+  /** --show-toplevel */
+  toplevel: string;
+  /** --path-format=absolute --git-dir */
+  gitDir: string;
+  /** --path-format=absolute --git-common-dir */
+  commonDir: string;
+  /** --abbrev-ref HEAD: the branch, or `HEAD` when detached */
+  abbrevRef: string;
+  /** --short HEAD */
+  shortHead: string;
+}
+
+/**
+ * The checkout a pane's folder sits in. A linked worktree has a git dir of its own under the
+ * common one, whose parent is the main checkout: herdr only makes worktrees from there.
+ */
+export function parseWorktreeSource(paneId: string, cwd: string, lines: WorktreeGitLines): WorktreeSource {
+  const checkoutRoot = resolve(lines.toplevel);
+  const commonDir = resolve(lines.commonDir);
+  const linked = resolve(lines.gitDir) !== commonDir;
+  const repoRoot = linked ? dirname(commonDir) : checkoutRoot;
+  return {
+    pane_id: paneId,
+    cwd: resolve(cwd),
+    checkout_root: checkoutRoot,
+    repo_root: repoRoot,
+    repo_name: basename(repoRoot),
+    branch: lines.abbrevRef === "HEAD" ? null : lines.abbrevRef,
+    head: lines.shortHead,
+    linked,
+  };
+}
+
+/** `git rev-parse <args>` in `cwd`, its output lines; a failure (no repo there) is HerdrError `not_a_git_repository`. */
+async function revParse(cwd: string, args: string[]): Promise<string[]> {
+  const proc = Bun.spawn(["git", "-C", cwd, "rev-parse", ...args], {
+    windowsHide: true, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: GIT_TIMEOUT_MS,
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+  });
+  const [output, errors, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  if (exitCode !== 0) throw new HerdrError("not_a_git_repository", errors.trim() || `${cwd} is not in a git repository`);
+  return output.trimEnd().split(/\r?\n/);
+}
+
+export async function resolveWorktreeSource(paneId: string, cwd: string): Promise<WorktreeSource> {
+  const [[toplevel, gitDir, commonDir], [abbrevRef], [shortHead]] = await Promise.all([
+    revParse(cwd, ["--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"]),
+    revParse(cwd, ["--abbrev-ref", "HEAD"]),
+    revParse(cwd, ["--short", "HEAD"]),
+  ]);
+  if (!toplevel || !gitDir || !commonDir || !abbrevRef || !shortHead) throw new HerdrError("not_a_git_repository", `git found no checkout at ${cwd}`);
+  return parseWorktreeSource(paneId, cwd, { toplevel, gitDir, commonDir, abbrevRef, shortHead });
+}
 
 export interface WorktreeCreateInput {
   pane_id: string;

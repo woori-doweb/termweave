@@ -237,6 +237,13 @@ export const JA: Record<string, string> = {
   "Branch name": "ブランチ名",
   "Base (optional)": "ベース (任意)",
   "Current branch": "現在のブランチ",
+  "Reading the terminal's branch…": "ターミナルのブランチを読み込み中…",
+  "From terminal {pane}": "元のターミナル {pane}",
+  "Folder {path}": "フォルダー {path}",
+  "Current branch {branch} ({head})": "現在のブランチ {branch} ({head})",
+  "Detached at {head}": "{head} で切り離された HEAD",
+  "This terminal is in a worktree of {repo}: the new worktree is made from the repo, based on {branch}.": "このターミナルは {repo} のワークツリー内にあります: 新しいワークツリーはリポジトリから作成し、{branch} をベースにします。",
+  "This terminal's folder is not in a git repository.": "このターミナルのフォルダーは git リポジトリではありません。",
   "Creates a git worktree from this terminal's folder and opens a shell there as a new workspace. Untracked files such as node_modules or .env are not copied.": "このターミナルのフォルダーから git ワークツリーを作成し、そこでシェルを新しいワークスペースとして開きます。node_modules や .env などの追跡されていないファイルはコピーされません。",
   "Create": "作成",
 
