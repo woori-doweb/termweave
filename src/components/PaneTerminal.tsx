@@ -87,6 +87,8 @@ export interface PaneTerminalProps {
   terminalFontSize: number;
   /** mouse reports sent per wheel event (settings): 1 is xterm's own one report */
   terminalWheelSpeed: number;
+  /** xterm line height as a multiple of the cell height (settings) */
+  terminalLineHeight: number;
   /** fonts tried before the built-in stack (settings); "" keeps the built-in one */
   terminalFontFamily: string;
   /** the resolved UI theme: the xterm theme object mirrors it */
@@ -135,6 +137,7 @@ export function PaneTerminal({
   autoSelected = false,
   terminalFontSize,
   terminalWheelSpeed,
+  terminalLineHeight,
   terminalFontFamily,
   theme,
   palette,
@@ -381,6 +384,7 @@ export function PaneTerminal({
       scrollback: 0,
       allowProposedApi: true,
       fontSize: terminalFontSize,
+      lineHeight: terminalLineHeight,
       // a chosen family follows in the font effect below, once its faces have loaded
       fontFamily: TERMINAL_FONT_STACK,
       theme: terminalTheme(theme, palette, settings),
@@ -1303,10 +1307,10 @@ export function PaneTerminal({
     term.options.minimumContrastRatio = terminalContrast(theme);
   }, [theme, palette, settings.appearancePreset, settings.customColors]);
 
-  // the font follows too, and a font change moves the grid. xterm measures the cell (and the DOM
-  // renderer its glyph widths) when fontFamily or fontSize changes, and setting the same value
-  // again changes nothing: so a chosen family is set only once its faces loaded, or the cell would
-  // stay measured from a fallback
+  // the font and line spacing follow too, and a change to either moves the grid. xterm measures the
+  // cell (and the DOM renderer its glyph widths) when fontFamily, fontSize or lineHeight changes, and
+  // setting the same value again changes nothing: so a chosen family is set only once its faces
+  // loaded, or the cell would stay measured from a fallback
   const fontFamily = terminalFontStack(terminalFontFamily);
   useEffect(() => {
     const term = termRef.current;
@@ -1315,9 +1319,10 @@ export function PaneTerminal({
     const apply = (): void => {
       // a newer font, or an unmounted terminal, took over while the faces loaded
       if (superseded || termRef.current !== term) return;
-      if (term.options.fontSize === terminalFontSize && term.options.fontFamily === fontFamily) return;
+      if (term.options.fontSize === terminalFontSize && term.options.fontFamily === fontFamily && term.options.lineHeight === terminalLineHeight) return;
       term.options.fontSize = terminalFontSize;
       term.options.fontFamily = fontFamily;
+      term.options.lineHeight = terminalLineHeight;
       if (observeRef.current || fixedGridRef.current || chatViewRef.current) return;
       try {
         fitRef.current?.fit();
@@ -1330,7 +1335,7 @@ export function PaneTerminal({
     if (fontFamily === TERMINAL_FONT_STACK) apply();
     else void loadFontStack(fontFamily, terminalFontSize).then(apply);
     return () => { superseded = true; };
-  }, [terminalFontSize, fontFamily]);
+  }, [terminalFontSize, fontFamily, terminalLineHeight]);
 
   // the grid must re-fit when the lens switches back: the chat lens covered it, and a
   // resize while covered may have been skipped by a zero-size layout

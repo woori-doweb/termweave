@@ -854,6 +854,7 @@ export function App() {
             autoSelected,
             terminalFontSize: settings.terminalFontSize,
             terminalWheelSpeed: settings.terminalWheelSpeed,
+            terminalLineHeight: settings.terminalLineHeight,
             terminalFontFamily: settings.terminalFontFamily,
             theme: resolvedTheme,
             palette: settings.palette,

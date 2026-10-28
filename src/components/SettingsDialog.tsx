@@ -10,7 +10,7 @@ import "./SettingsDialog.css";
 import type { AppActions } from "../lib/actions.ts";
 import { useInstallPrompt } from "../lib/install.ts";
 import { SHORTCUTS, formatKeys, shortcutKeys, shortcutConflict } from "../lib/shortcuts.ts";
-import { CHAT_FONT_MAX, CHAT_FONT_MIN, chatFontSize, DEFAULT_SETTINGS, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, TERMINAL_FONT_MAX, TERMINAL_FONT_MIN, TERMINAL_WHEEL_SPEED_MAX, TERMINAL_WHEEL_SPEED_MIN, useSettings, forgetPaneViews } from "../lib/settings.ts";
+import { CHAT_FONT_MAX, CHAT_FONT_MIN, chatFontSize, DEFAULT_SETTINGS, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, TERMINAL_FONT_MAX, TERMINAL_FONT_MIN, TERMINAL_LINE_HEIGHT_MAX, TERMINAL_LINE_HEIGHT_MIN, TERMINAL_LINE_HEIGHT_STEP, TERMINAL_WHEEL_SPEED_MAX, TERMINAL_WHEEL_SPEED_MIN, useSettings, forgetPaneViews } from "../lib/settings.ts";
 import { migrateUpstreamPreferences } from '../lib/migrateStorage.ts';
 import { LANGUAGE_NAMES, LANGUAGE_SETTINGS, useT } from "../lib/i18n.ts";
 import { FONT_FAMILY_MAX_CHARS, sanitizeFontFamily } from "../lib/fontFamily.ts";
@@ -443,6 +443,14 @@ export function SettingsDialog({ open, onClose, actions, updates, auth, onEnable
                     <button type="button" className="icon-button" aria-label={t("Decrease terminal font size")} disabled={settings.terminalFontSize <= TERMINAL_FONT_MIN} onClick={() => update({ terminalFontSize: settings.terminalFontSize - 1 })}><Minus /></button>
                     <output aria-live="polite">{settings.terminalFontSize}px</output>
                     <button type="button" className="icon-button" aria-label={t("Increase terminal font size")} disabled={settings.terminalFontSize >= TERMINAL_FONT_MAX} onClick={() => update({ terminalFontSize: settings.terminalFontSize + 1 })}><Plus /></button>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div><span className="settings-label">{t("Line spacing")}</span><span className="settings-description">{t("Space between terminal lines")}</span></div>
+                  <div className="settings-stepper" aria-label={t("Line spacing")}>
+                    <button type="button" className="icon-button" aria-label={t("Decrease line spacing")} disabled={settings.terminalLineHeight <= TERMINAL_LINE_HEIGHT_MIN} onClick={() => update({ terminalLineHeight: Math.round((settings.terminalLineHeight - TERMINAL_LINE_HEIGHT_STEP) * 10) / 10 })}><Minus /></button>
+                    <output aria-live="polite">{settings.terminalLineHeight.toFixed(1)}</output>
+                    <button type="button" className="icon-button" aria-label={t("Increase line spacing")} disabled={settings.terminalLineHeight >= TERMINAL_LINE_HEIGHT_MAX} onClick={() => update({ terminalLineHeight: Math.round((settings.terminalLineHeight + TERMINAL_LINE_HEIGHT_STEP) * 10) / 10 })}><Plus /></button>
                   </div>
                 </div>
                 <div className="settings-row">

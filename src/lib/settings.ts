@@ -42,6 +42,8 @@ export interface Settings {
   terminalFontSize: number;
   /** mouse reports sent to herdr per wheel event in the terminal: 1 is what xterm sends by itself */
   terminalWheelSpeed: number;
+  /** xterm line height as a multiple of the font's cell height: 1 is xterm's own spacing */
+  terminalLineHeight: number;
   /** fonts tried before the built-in terminal stack, as a CSS font-family list; "" keeps the built-in one */
   terminalFontFamily: string;
   /** chat text size in px (its body text; the rest scales with it); null follows the density */
@@ -97,6 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   palette: "amber",
   terminalFontSize: 13,
   terminalWheelSpeed: 1,
+  terminalLineHeight: 1,
   terminalFontFamily: "",
   chatFontSize: null,
   chatFontFamily: "",
@@ -148,6 +151,9 @@ export const TERMINAL_FONT_MIN = 10;
 export const TERMINAL_FONT_MAX = 22;
 export const TERMINAL_WHEEL_SPEED_MIN = 1;
 export const TERMINAL_WHEEL_SPEED_MAX = 10;
+export const TERMINAL_LINE_HEIGHT_MIN = 1;
+export const TERMINAL_LINE_HEIGHT_MAX = 2;
+export const TERMINAL_LINE_HEIGHT_STEP = 0.1;
 
 export const CHAT_FONT_MIN = 11;
 export const CHAT_FONT_MAX = 24;
@@ -182,6 +188,9 @@ export function sanitizeSettings(raw: unknown): Settings {
     terminalWheelSpeed: typeof record["terminalWheelSpeed"] === "number" && Number.isFinite(record["terminalWheelSpeed"])
       ? Math.min(TERMINAL_WHEEL_SPEED_MAX, Math.max(TERMINAL_WHEEL_SPEED_MIN, Math.round(record["terminalWheelSpeed"])))
       : DEFAULT_SETTINGS.terminalWheelSpeed,
+    terminalLineHeight: typeof record["terminalLineHeight"] === "number" && Number.isFinite(record["terminalLineHeight"])
+      ? Math.round(Math.min(TERMINAL_LINE_HEIGHT_MAX, Math.max(TERMINAL_LINE_HEIGHT_MIN, record["terminalLineHeight"])) * 10) / 10
+      : DEFAULT_SETTINGS.terminalLineHeight,
     chatFontSize: typeof chatFont === "number" && Number.isFinite(chatFont)
       ? Math.min(CHAT_FONT_MAX, Math.max(CHAT_FONT_MIN, Math.round(chatFont)))
       : DEFAULT_SETTINGS.chatFontSize,

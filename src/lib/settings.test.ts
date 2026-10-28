@@ -19,6 +19,17 @@ it("keeps the screen wake lock off until this device explicitly enables it", () 
   expect(sanitizeSettings({ terminalWheelSpeed: "3" }).terminalWheelSpeed).toBe(1);
 });
 
+it("keeps the terminal line height at xterm's own spacing unless chosen, bounded to one decimal", () => {
+  expect(DEFAULT_SETTINGS.terminalLineHeight).toBe(1);
+  expect(sanitizeSettings({}).terminalLineHeight).toBe(1);
+  expect(sanitizeSettings({ terminalLineHeight: 1.3 }).terminalLineHeight).toBe(1.3);
+  expect(sanitizeSettings({ terminalLineHeight: 1.26 }).terminalLineHeight).toBe(1.3);
+  expect(sanitizeSettings({ terminalLineHeight: 9 }).terminalLineHeight).toBe(2);
+  expect(sanitizeSettings({ terminalLineHeight: 0.5 }).terminalLineHeight).toBe(1);
+  expect(sanitizeSettings({ terminalLineHeight: Number.NaN }).terminalLineHeight).toBe(1);
+  expect(sanitizeSettings({ terminalLineHeight: "1.5" }).terminalLineHeight).toBe(1);
+});
+
 it("defaults legacy records to workspace grouping and accepts only supported modes", () => {
   expect(sanitizeSettings({}).sidebarGrouping).toBe("workspace");
   expect(sanitizeSettings({ sidebarGrouping: "workspace" }).sidebarGrouping).toBe("workspace");

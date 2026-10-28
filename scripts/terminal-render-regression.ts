@@ -202,7 +202,7 @@ function Fixture() {
   policy.setAutoSelected = setAutoSelected;
   useEffect(() => { policy.autoSelected.push(autoSelected); }, [autoSelected]);
   return <main style={{ height: '100dvh', width: '100%' }}><PaneTerminal paneId="${INPUT_POLICY_PANE}" view="terminal" terminalFontSize={14}
-    terminalWheelSpeed={1} terminalFontFamily="" theme="dark" palette="amber" role="interact" autoSelected={autoSelected} /></main>;
+    terminalWheelSpeed={1} terminalLineHeight={1} terminalFontFamily="" theme="dark" palette="amber" role="interact" autoSelected={autoSelected} /></main>;
 }
 createRoot(document.getElementById('root')!).render(<SettingsProvider><Fixture /></SettingsProvider>);
 `;
@@ -495,7 +495,7 @@ function Fixture() {
   const [pane, setPane] = useState(flow.pane);
   flow.setPane = setPane;
   return <main style={{ height: '100dvh', width: '100%' }}><PaneTerminal paneId={pane} view="terminal" terminalFontSize={14}
-    terminalWheelSpeed={1} terminalFontFamily="" theme="dark" palette="amber" role="interact" /></main>;
+    terminalWheelSpeed={1} terminalLineHeight={1} terminalFontFamily="" theme="dark" palette="amber" role="interact" /></main>;
 }
 createRoot(document.getElementById('root')!).render(<SettingsProvider><Fixture /></SettingsProvider>);
 `;
