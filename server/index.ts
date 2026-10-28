@@ -54,7 +54,10 @@ import {
   workspaceClose,
   workspaceCreate,
   workspaceMove,
-  workspaceRename, PANE_GONE_CODES } from "./herdr/client.ts";
+  workspaceRename,
+  worktreeCreate,
+  worktreeRemove, PANE_GONE_CODES } from "./herdr/client.ts";
+import { parseWorktreeCreate, worktreeFailure } from "./worktree.ts";
 import { type AlertTiming, createPushService, defaultStateDir, handlePushRequest } from "./push.ts";
 import { codexQuestionsCollapsed, handlePromptRequest } from "./prompt.ts";
 import { secretPrompt, validSecret } from "../shared/secret-prompt.ts";
@@ -1077,7 +1080,7 @@ export function createServer(
       const url = new URL(request.url);
       let { pathname } = url;
       const bridgeAuthorized = isAuthenticated(request, bridgeToken);
-      const bridgePath = pathname === "/api/bridge" || pathname === "/api/session" || pathname === "/api/agents" || pathname.startsWith("/api/pane/") || pathname.startsWith("/api/workspace/") || pathname.startsWith("/api/fs/") || pathname === "/ws";
+      const bridgePath = pathname === "/api/bridge" || pathname === "/api/session" || pathname === "/api/agents" || pathname.startsWith("/api/pane/") || pathname.startsWith("/api/workspace/") || pathname.startsWith("/api/worktree/") || pathname.startsWith("/api/fs/") || pathname === "/ws";
       const ip = bunServer.requestIP(request);
       if (ownedStop && pathname === OWNED_STOP_PATH) return ownedStopResponse(request, ip?.address ?? null, bunServer.port);
       const access = decideAccess({
@@ -1178,7 +1181,7 @@ export function createServer(
         if (pathname.startsWith("/api/machines/local/")) {
           if (!sameOrigin(request) || (request.method !== "GET" && request.headers.get("x-herdr-machine") !== "1")) return jsonResponse({ error: { code: "invalid_origin", message: "Use PC controls from this app" } }, 403);
           pathname = pathname.replace("/api/machines/local/", "/api/");
-          if (!/^\/api\/(session|agents|pane\/|workspace\/)/.test(pathname)) return badRequest("invalid_route", "Unknown PC endpoint");
+          if (!/^\/api\/(session|agents|pane\/|workspace\/|worktree\/)/.test(pathname)) return badRequest("invalid_route", "Unknown PC endpoint");
           url.pathname = pathname;
         } else {
           bunServer.timeout(request, pathname === "/api/machines/events" ? 0 : 80);
@@ -1415,6 +1418,61 @@ export function createServer(
           }
         } catch (error) {
           return errorResponse(error);
+        }
+      }
+
+      if (pathname === "/api/worktree/create") {
+        if (request.method !== "POST") return badRequest("method_not_allowed", "use POST");
+        let payload: unknown;
+        try {
+          payload = await request.json();
+        } catch {
+          return badRequest("invalid_json", "request body must be JSON");
+        }
+        const parsed = parseWorktreeCreate(payload);
+        if (!parsed.ok) return badRequest(parsed.code, parsed.message);
+        const { pane_id: paneId, branch, base } = parsed.value;
+        try {
+          const snapshot = await sessionSnapshot();
+          const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
+          if (!pane) return badRequest("pane_not_found", `pane ${paneId} not found`);
+          const cwd = pane.foreground_cwd ?? pane.cwd;
+          if (!cwd) return badRequest("cwd_not_found", `pane ${paneId} has no working directory`);
+          const created = await worktreeCreate({ cwd, branch, ...(base === undefined ? {} : { base }), label: branch });
+          // herdr appends the new workspace: the sidebar shows it right under the terminal's own
+          const sourceIndex = snapshot.workspaces.findIndex((workspace) => workspace.workspace_id === pane.workspace_id);
+          if (sourceIndex >= 0) {
+            try {
+              await workspaceMove(created.workspace.workspace_id, sourceIndex + 1);
+            } catch (error) {
+              console.error("[worktree] placing the new workspace failed:", error instanceof Error ? error.message : error);
+            }
+          }
+          broadcastAll({ type: "session-changed" });
+          return jsonResponse({ workspace_id: created.workspace.workspace_id, pane_id: created.root_pane.pane_id, cwd: created.root_pane.cwd ?? created.workspace.worktree?.checkout_path ?? "" });
+        } catch (error) {
+          return worktreeFailure(error);
+        }
+      }
+
+      if (pathname === "/api/worktree/remove") {
+        if (request.method !== "POST") return badRequest("method_not_allowed", "use POST");
+        let payload: { workspace_id?: unknown; force?: unknown };
+        try {
+          payload = (await request.json()) as typeof payload;
+        } catch {
+          return badRequest("invalid_json", "request body must be JSON");
+        }
+        if (!isJsonObject(payload)) return badRequest("invalid_body", "request body must be a JSON object");
+        if (typeof payload.workspace_id !== "string" || payload.workspace_id.length === 0) {
+          return badRequest("missing_workspace_id", "workspace_id is required");
+        }
+        try {
+          await worktreeRemove(payload.workspace_id, payload.force === true);
+          broadcastAll({ type: "session-changed" });
+          return jsonResponse({ ok: true });
+        } catch (error) {
+          return worktreeFailure(error);
         }
       }
 

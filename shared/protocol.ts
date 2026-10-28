@@ -99,6 +99,11 @@ export type { Machine, MachineEvent, PaneTarget, SetupJob, SetupRequest, SetupAc
  *  POST   /api/workspace/rename { workspace_id, label } -> { ok: true }
  *  POST   /api/workspace/move   { workspace_id, insert_index } -> { ok: true } (sidebar reorder)
  *  POST   /api/workspace/close  { workspace_id } -> { ok: true }
+ *  POST   /api/worktree/create  { pane_id, branch, base? } -> WorktreeCreated (worktree.create from the
+ *         pane's folder, labelled with the branch, then placed right after the pane's workspace;
+ *         400 missing_branch / pane_not_found, 409 with herdr's code when herdr refuses)
+ *  POST   /api/worktree/remove  { workspace_id, force? } -> { ok: true } (closes the workspace and deletes
+ *         its checkout, the branch stays; 409 dirty_worktree_requires_force on a dirty checkout without force)
  *  POST   /api/auth        { token }     -> 204 + Set-Cookie herdr_web_token (401 invalid_token on mismatch)
  *  DELETE /api/auth                      -> 204, clears the token and the device cookies
  *  GET    /api/devices                   -> { devices: PairedDevice[] } (the paired devices; `current` marks the caller's)
@@ -400,6 +405,27 @@ export interface WorkspaceCreated {
   agent_started: boolean;
   /** The workspace still exists when its requested agent could not start. */
   error?: { code: string; message: string };
+}
+
+/** POST /api/worktree/create: a git worktree of the pane's repo; blank or null `base` branches from HEAD. */
+export interface WorktreeCreateRequest {
+  pane_id: string;
+  branch: string;
+  base?: string | null;
+}
+
+/** POST /api/worktree/create: the workspace herdr opened on the checkout and its root pane's shell. */
+export interface WorktreeCreated {
+  workspace_id: string;
+  pane_id: string;
+  /** the checkout the root pane's shell runs in */
+  cwd: string;
+}
+
+/** POST /api/worktree/remove: `force` deletes a checkout with modified or untracked files. */
+export interface WorktreeRemoveRequest {
+  workspace_id: string;
+  force?: boolean;
 }
 
 /** GET /api/pane/commands: one slash command the pane's agent understands. */

@@ -244,6 +244,40 @@ export async function workspaceClose(workspaceId: string, socketPath?: string): 
   await herdrRpc("workspace.close", { workspace_id: workspaceId }, socketPath);
 }
 
+export interface WorktreeCreateResult {
+  workspace: WorkspaceInfo;
+  tab: TabInfo;
+  root_pane: PaneInfo;
+}
+
+// git checks out or deletes the whole tree before herdr answers: a large repo (or node_modules on Windows) outlasts the default
+const WORKTREE_TIMEOUT_MS = 120_000;
+
+/** A git worktree of the repo `cwd` is in, opened as a new workspace whose root pane is a shell in the checkout. */
+export async function worktreeCreate(
+  options: { cwd: string; branch: string; base?: string; label?: string },
+  socketPath?: string,
+): Promise<WorktreeCreateResult> {
+  const created = await herdrRpc<WorktreeCreateResult & { type: "worktree_created" }>(
+    "worktree.create",
+    {
+      cwd: options.cwd,
+      branch: options.branch,
+      ...(options.base === undefined ? {} : { base: options.base }),
+      ...(options.label === undefined ? {} : { label: options.label }),
+      focus: false,
+    },
+    socketPath,
+    WORKTREE_TIMEOUT_MS,
+  );
+  return { workspace: created.workspace, tab: created.tab, root_pane: created.root_pane };
+}
+
+/** Closes a worktree workspace and deletes its checkout; the branch stays. A dirty checkout needs `force`. */
+export async function worktreeRemove(workspaceId: string, force: boolean, socketPath?: string): Promise<void> {
+  await herdrRpc("worktree.remove", { workspace_id: workspaceId, force }, socketPath, WORKTREE_TIMEOUT_MS);
+}
+
 export interface PaneReadOptions {
   paneId: string;
   source?: ReadSource;

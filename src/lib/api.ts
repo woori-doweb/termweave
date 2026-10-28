@@ -18,6 +18,9 @@ import type {
   SlashCommand,
   UsageReport,
   WorkspaceCreated,
+  WorktreeCreated,
+  WorktreeCreateRequest,
+  WorktreeRemoveRequest,
 } from "../../shared/protocol.ts";
 import type { PaneScrollInfo } from "../../shared/herdr-api.generated.ts";
 import type { HerdrUpdateStatus, UpdateCommand, UpdateStatus } from "../../shared/update.ts";
@@ -377,6 +380,17 @@ export async function moveWorkspace(workspaceId: string, insertIndex: number, ma
 
 export async function closeWorkspace(workspaceId: string, machineId = "local"): Promise<void> {
   await sendJson(machinePath(machineId, "workspace/close"), "POST", { workspace_id: workspaceId });
+}
+
+/** POST /api/worktree/create: a new workspace on a git worktree of the pane's folder, placed right after the pane's workspace. */
+export async function createWorktreePane(request: WorktreeCreateRequest, machineId = "local"): Promise<WorktreeCreated> {
+  const response = await sendJson(machinePath(machineId, "worktree/create"), "POST", request);
+  return (await response.json()) as WorktreeCreated;
+}
+
+/** POST /api/worktree/remove: closes the worktree workspace and deletes its checkout; 409 dirty_worktree_requires_force without `force`. */
+export async function removeWorktree(workspaceId: string, force: boolean, machineId = "local"): Promise<void> {
+  await sendJson(machinePath(machineId, "worktree/remove"), "POST", { workspace_id: workspaceId, force } satisfies WorktreeRemoveRequest);
 }
 
 /** GET /api/pane/commands: the slash commands the pane's agent understands (built-in + custom). */
