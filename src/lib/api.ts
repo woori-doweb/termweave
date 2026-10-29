@@ -22,6 +22,9 @@ import type {
   WorkspaceCreated,
   WorktreeCreated,
   WorktreeCreateRequest,
+  WorktreeEntry,
+  WorktreeOpened,
+  WorktreeOpenRequest,
   WorktreeRemoveRequest,
   WorktreeSource,
 } from "../../shared/protocol.ts";
@@ -404,6 +407,17 @@ export function fetchWorktreeSource(paneId: string, machineId = "local"): Promis
 export async function createWorktreePane(request: WorktreeCreateRequest, machineId = "local"): Promise<WorktreeCreated> {
   const response = await sendJson(machinePath(machineId, "worktree/create"), "POST", request);
   return (await response.json()) as WorktreeCreated;
+}
+
+/** GET /api/worktree/list: the linked worktrees of the pane's repo, open or closed; 409 not_a_git_repository outside a repo. */
+export async function fetchWorktrees(paneId: string, machineId = "local"): Promise<WorktreeEntry[]> {
+  return (await getJson<{ worktrees: WorktreeEntry[] }>(machinePath(machineId, `worktree/list?pane_id=${encodeURIComponent(paneId)}`))).worktrees;
+}
+
+/** POST /api/worktree/open: a worktree of the pane's repo opened again as a workspace at the same path. */
+export async function openWorktreePane(paneId: string, path: string, machineId = "local"): Promise<WorktreeOpened> {
+  const response = await sendJson(machinePath(machineId, "worktree/open"), "POST", { pane_id: paneId, path } satisfies WorktreeOpenRequest);
+  return (await response.json()) as WorktreeOpened;
 }
 
 /** POST /api/worktree/remove: closes the worktree workspace and deletes its checkout; 409 dirty_worktree_requires_force without `force`. */

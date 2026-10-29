@@ -250,6 +250,9 @@ export const JA: Record<string, string> = {
   "This terminal's folder is not in a git repository.": "このターミナルのフォルダーは git リポジトリではありません。",
   "Creates a git worktree from this terminal's folder and opens a shell there as a new workspace. Untracked files such as node_modules or .env are not copied.": "このターミナルのフォルダーから git ワークツリーを作成し、そこでシェルを新しいワークスペースとして開きます。node_modules や .env などの追跡されていないファイルはコピーされません。",
   "Create": "作成",
+  "Closed worktrees": "閉じたワークツリー",
+  "Closing the terminal keeps the worktree folder and its changes. Opening it again at the same path lets the agent continue its session (gjc -c).": "ターミナルを閉じてもワークツリーのフォルダーと変更は残ります。同じパスで開き直すと、エージェントのセッションを続けられます (gjc -c)。",
+  "Folder missing": "フォルダーがありません",
 
   // ---- PCs sidebar ----
   "Connecting…": "接続しています…",

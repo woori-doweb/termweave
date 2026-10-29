@@ -252,6 +252,9 @@ export const ZH: Record<string, string> = {
   "This terminal's folder is not in a git repository.": "此终端的文件夹不在 git 仓库中。",
   "Creates a git worktree from this terminal's folder and opens a shell there as a new workspace. Untracked files such as node_modules or .env are not copied.": "从此终端的文件夹创建 git 工作树，并在其中打开一个 shell 作为新工作区。node_modules 或 .env 等未跟踪的文件不会被复制。",
   "Create": "创建",
+  "Closed worktrees": "已关闭的工作树",
+  "Closing the terminal keeps the worktree folder and its changes. Opening it again at the same path lets the agent continue its session (gjc -c).": "关闭终端后，工作树文件夹及其更改仍会保留。在同一路径重新打开即可继续代理会话 (gjc -c)。",
+  "Folder missing": "文件夹缺失",
 
   // ---- PCs sidebar ----
   "Connecting…": "正在连接…",

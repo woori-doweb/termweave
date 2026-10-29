@@ -253,6 +253,9 @@ export const KO: Record<string, string> = {
   "This terminal's folder is not in a git repository.": "이 터미널의 폴더는 git 리포지토리가 아닙니다.",
   "Creates a git worktree from this terminal's folder and opens a shell there as a new workspace. Untracked files such as node_modules or .env are not copied.": "이 터미널의 폴더에서 git 워크트리를 만들고, 그곳의 셸을 새 워크스페이스로 엽니다. node_modules나 .env 같은 추적되지 않는 파일은 복사되지 않습니다.",
   "Create": "만들기",
+  "Closed worktrees": "닫힌 워크트리",
+  "Closing the terminal keeps the worktree folder and its changes. Opening it again at the same path lets the agent continue its session (gjc -c).": "터미널을 닫아도 워크트리 폴더와 변경사항은 남습니다. 같은 경로로 다시 열면 에이전트 세션을 이어서 쓸 수 있습니다 (gjc -c).",
+  "Folder missing": "폴더 없음",
 
   // ---- PCs sidebar ----
   "Connecting…": "연결 중…",

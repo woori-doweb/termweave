@@ -57,8 +57,10 @@ import {
   workspaceMove,
   workspaceRename,
   worktreeCreate,
+  worktreeList,
+  worktreeOpen,
   worktreeRemove, PANE_GONE_CODES } from "./herdr/client.ts";
-import { parseWorktreeCreate, resolveWorktreeSource, worktreeFailure } from "./worktree.ts";
+import { findLinkedWorktree, linkedWorktrees, parseWorktreeCreate, parseWorktreeOpen, resolveWorktreeSource, worktreeFailure } from "./worktree.ts";
 import { type AlertTiming, createPushService, defaultStateDir, handlePushRequest } from "./push.ts";
 import { codexQuestionsCollapsed, handlePromptRequest } from "./prompt.ts";
 import { secretPrompt, validSecret } from "../shared/secret-prompt.ts";
@@ -1495,6 +1497,65 @@ export function createServer(
           }
           broadcastAll({ type: "session-changed" });
           return jsonResponse({ workspace_id: created.workspace.workspace_id, pane_id: created.root_pane.pane_id, cwd: created.root_pane.cwd ?? created.workspace.worktree?.checkout_path ?? "" });
+        } catch (error) {
+          return worktreeFailure(error);
+        }
+      }
+
+      if (pathname === "/api/worktree/list") {
+        if (request.method !== "GET") return badRequest("method_not_allowed", "use GET");
+        const paneId = url.searchParams.get("pane_id")?.trim();
+        if (!paneId) return badRequest("missing_pane_id", "pane_id query parameter is required");
+        try {
+          const pane = (await sessionSnapshot()).panes.find((candidate) => candidate.pane_id === paneId);
+          if (!pane) return badRequest("pane_not_found", `pane ${paneId} not found`);
+          const cwd = pane.foreground_cwd ?? pane.cwd;
+          if (!cwd) return badRequest("cwd_not_found", `pane ${paneId} has no working directory`);
+          const source = await resolveWorktreeSource(paneId, cwd);
+          const listed = await worktreeList(source.repo_root);
+          return jsonResponse({ worktrees: linkedWorktrees(listed.worktrees) });
+        } catch (error) {
+          return worktreeFailure(error);
+        }
+      }
+
+      if (pathname === "/api/worktree/open") {
+        if (request.method !== "POST") return badRequest("method_not_allowed", "use POST");
+        let payload: unknown;
+        try {
+          payload = await request.json();
+        } catch {
+          return badRequest("invalid_json", "request body must be JSON");
+        }
+        const parsed = parseWorktreeOpen(payload);
+        if (!parsed.ok) return badRequest(parsed.code, parsed.message);
+        const { pane_id: paneId, path } = parsed.value;
+        try {
+          const snapshot = await sessionSnapshot();
+          const pane = snapshot.panes.find((candidate) => candidate.pane_id === paneId);
+          if (!pane) return badRequest("pane_not_found", `pane ${paneId} not found`);
+          const cwd = pane.foreground_cwd ?? pane.cwd;
+          if (!cwd) return badRequest("cwd_not_found", `pane ${paneId} has no working directory`);
+          // the checkout is opened from the main checkout (herdr refuses a linked one) and only when
+          // it is a worktree of the pane's repo, by the path herdr itself lists it under
+          const source = await resolveWorktreeSource(paneId, cwd);
+          const worktree = findLinkedWorktree((await worktreeList(source.repo_root)).worktrees, path);
+          if (!worktree) return badRequest("worktree_not_found", `${path} is not a worktree of ${source.repo_name}`);
+          const opened = await worktreeOpen({ cwd: source.repo_root, path: worktree.path });
+          const workspaceId = opened.root_pane.workspace_id;
+          if (!opened.already_open) {
+            // herdr appends the reopened workspace: the sidebar shows it right under the terminal's own
+            const sourceIndex = snapshot.workspaces.findIndex((workspace) => workspace.workspace_id === pane.workspace_id);
+            if (sourceIndex >= 0) {
+              try {
+                await workspaceMove(workspaceId, sourceIndex + 1);
+              } catch (error) {
+                console.error("[worktree] placing the reopened workspace failed:", error instanceof Error ? error.message : error);
+              }
+            }
+            broadcastAll({ type: "session-changed" });
+          }
+          return jsonResponse({ workspace_id: workspaceId, pane_id: opened.root_pane.pane_id, already_open: opened.already_open });
         } catch (error) {
           return worktreeFailure(error);
         }

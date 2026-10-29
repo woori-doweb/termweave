@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowDown, ArrowUp, Ellipsis, FolderInput, GitBranch, Pencil, Trash2 } from "lucide-react";
-import type { WorktreeCreated } from "../../shared/protocol.ts";
+import type { WorktreeCreated, WorktreeOpened } from "../../shared/protocol.ts";
 import { paneNumber } from "../lib/paneNumber.ts";
 import { useT } from "../lib/i18n.ts";
 import { RowMenu } from "./RowMenu.tsx";
@@ -11,7 +11,7 @@ import { WorktreeDialog } from "./WorktreeDialog.tsx";
 type Pane = { pane_id: string; terminal_id: string; global_pane_number?: number; label?: string | null };
 export function TerminalMenu({ pane, machineId, onRefresh, onMove, onMoveUp, onMoveDown, onWorktreeCreated, disabled = false }: {
   pane: Pane; machineId: string; onRefresh: () => void | Promise<void>; onMove?: () => void;
-  onMoveUp?: () => void; onMoveDown?: () => void; onWorktreeCreated?: (created: WorktreeCreated) => void | Promise<void>; disabled?: boolean;
+  onMoveUp?: () => void; onMoveDown?: () => void; onWorktreeCreated?: (created: WorktreeCreated | WorktreeOpened) => void | Promise<void>; disabled?: boolean;
 }) {
   const t = useT();
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);

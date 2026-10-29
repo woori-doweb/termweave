@@ -1,6 +1,7 @@
 import { expect, it } from "bun:test";
 import { join, resolve } from "node:path";
-import { parseWorktreeCreate, parseWorktreeSource } from "./worktree.ts";
+import type { HerdrWorktreeEntry } from "./herdr/client.ts";
+import { findLinkedWorktree, linkedWorktrees, parseWorktreeCreate, parseWorktreeOpen, parseWorktreeSource } from "./worktree.ts";
 
 const repo = resolve("/work/teamweave");
 
@@ -66,5 +67,57 @@ it.skipIf(process.platform !== "win32")("turns git's forward-slashed Windows pat
 it("rejects a body that is not a JSON object", () => {
   for (const body of [null, "feat-a", ["w1:p1", "feat-a"]]) {
     expect(parseWorktreeCreate(body)).toMatchObject({ ok: false, code: "invalid_body" });
+    expect(parseWorktreeOpen(body)).toMatchObject({ ok: false, code: "invalid_body" });
   }
+});
+
+it("trims the pane and the path of an open request", () => {
+  expect(parseWorktreeOpen({ pane_id: " w1:p1 ", path: " /work/wt/feat-a\t" })).toEqual({ ok: true, value: { pane_id: "w1:p1", path: "/work/wt/feat-a" } });
+});
+
+it("rejects an open request without a pane or a path", () => {
+  for (const pane_id of [undefined, "", "  ", 3]) {
+    expect(parseWorktreeOpen({ pane_id, path: "/work/wt/feat-a" })).toMatchObject({ ok: false, code: "missing_pane_id" });
+  }
+  for (const path of [undefined, "", "   ", 7, null]) {
+    expect(parseWorktreeOpen({ pane_id: "w1:p1", path })).toMatchObject({ ok: false, code: "missing_path" });
+  }
+});
+
+const listed = (entry: Partial<HerdrWorktreeEntry> & { path: string }): HerdrWorktreeEntry => ({
+  is_bare: false, is_detached: false, is_linked_worktree: true, is_prunable: false, label: null, ...entry,
+});
+
+it("lists only the linked worktrees, with their branch, workspace and missing folder", () => {
+  const featA = resolve("/work/wt/feat-a");
+  const orph = resolve("/work/wt/orph");
+  const gone = resolve("/work/wt/gone");
+  expect(linkedWorktrees([
+    listed({ path: repo, branch: "dev", is_linked_worktree: false, open_workspace_id: "w1" }),
+    listed({ path: resolve("/work/bare"), is_bare: true }),
+    listed({ path: featA, branch: "feat-a", open_workspace_id: "w2" }),
+    listed({ path: orph, branch: "orph" }),
+    listed({ path: resolve("/work/wt/detached"), branch: null, is_detached: true }),
+    listed({ path: gone, branch: "gone", is_prunable: true }),
+  ])).toEqual([
+    { path: featA, branch: "feat-a", open_workspace_id: "w2", prunable: false },
+    { path: orph, branch: "orph", open_workspace_id: null, prunable: false },
+    { path: resolve("/work/wt/detached"), branch: null, open_workspace_id: null, prunable: false },
+    { path: gone, branch: "gone", open_workspace_id: null, prunable: true },
+  ]);
+});
+
+it("finds a linked worktree by its path, never the main checkout", () => {
+  const orph = listed({ path: resolve("/work/wt/orph"), branch: "orph" });
+  const main = listed({ path: repo, branch: "dev", is_linked_worktree: false });
+  expect(findLinkedWorktree([main, orph], resolve("/work/wt/orph"))).toBe(orph);
+  expect(findLinkedWorktree([main, orph], repo)).toBeUndefined();
+  expect(findLinkedWorktree([main, orph], resolve("/work/wt/other"))).toBeUndefined();
+});
+
+// herdr lists `C:/…`, the client sends back the backslashed path it was shown
+it.skipIf(process.platform !== "win32")("reads herdr's forward-slashed Windows paths as the platform's", () => {
+  const orph = listed({ path: "C:/Users/x/.herdr/worktrees/wt-p/orph", branch: "orph" });
+  expect(linkedWorktrees([orph])).toEqual([{ path: "C:\\Users\\x\\.herdr\\worktrees\\wt-p\\orph", branch: "orph", open_workspace_id: null, prunable: false }]);
+  expect(findLinkedWorktree([orph], "C:\\Users\\x\\.herdr\\worktrees\\wt-p\\orph")).toBe(orph);
 });

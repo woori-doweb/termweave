@@ -4,8 +4,8 @@
  * optional (null or blank: the branch, or the commit, the pane's checkout is on).
  */
 import { basename, dirname, resolve } from "node:path";
-import type { WorktreeSource } from "../shared/protocol.ts";
-import { HerdrError } from "./herdr/client.ts";
+import type { WorktreeEntry, WorktreeOpenRequest, WorktreeSource } from "../shared/protocol.ts";
+import { type HerdrWorktreeEntry, HerdrError } from "./herdr/client.ts";
 import { errorResponse, isJsonObject, jsonResponse } from "./http.ts";
 
 const GIT_TIMEOUT_MS = 5_000;
@@ -85,6 +85,36 @@ export function parseWorktreeCreate(payload: unknown): WorktreeCreateParse {
   }
   const base = typeof payload.base === "string" ? payload.base.trim() : "";
   return { ok: true, value: { pane_id: paneId, branch, ...(base === "" ? {} : { base }) } };
+}
+
+export type WorktreeOpenParse = { ok: true; value: WorktreeOpenRequest } | { ok: false; code: string; message: string };
+
+export function parseWorktreeOpen(payload: unknown): WorktreeOpenParse {
+  if (!isJsonObject(payload)) return { ok: false, code: "invalid_body", message: "request body must be a JSON object" };
+  const paneId = typeof payload.pane_id === "string" ? payload.pane_id.trim() : "";
+  if (paneId === "") return { ok: false, code: "missing_pane_id", message: "pane_id is required" };
+  const path = typeof payload.path === "string" ? payload.path.trim() : "";
+  if (path === "") return { ok: false, code: "missing_path", message: "path is required" };
+  return { ok: true, value: { pane_id: paneId, path } };
+}
+
+/**
+ * The linked worktrees of `worktree.list`, the main checkout and a bare repo left out; herdr's
+ * forward-slashed Windows paths become the platform's, as the pane folders are.
+ */
+export function linkedWorktrees(worktrees: readonly HerdrWorktreeEntry[]): WorktreeEntry[] {
+  return worktrees.filter((entry) => entry.is_linked_worktree && !entry.is_bare).map((entry) => ({
+    path: resolve(entry.path),
+    branch: entry.is_detached || !entry.branch ? null : entry.branch,
+    open_workspace_id: entry.open_workspace_id ?? null,
+    prunable: entry.is_prunable,
+  }));
+}
+
+/** The linked worktree of `worktree.list` at `path` (in either slash form), as herdr spells it; undefined when the repo has none there. */
+export function findLinkedWorktree(worktrees: readonly HerdrWorktreeEntry[], path: string): HerdrWorktreeEntry | undefined {
+  const wanted = resolve(path);
+  return worktrees.find((entry) => entry.is_linked_worktree && !entry.is_bare && resolve(entry.path) === wanted);
 }
 
 /**

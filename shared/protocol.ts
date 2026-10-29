@@ -106,6 +106,11 @@ export type { Machine, MachineEvent, PaneTarget, SetupJob, SetupRequest, SetupAc
  *         the pane's branch or commit, labelled with the branch, then placed right after the pane's
  *         workspace; 400 missing_branch / pane_not_found, 409 not_a_git_repository or herdr's code when
  *         herdr refuses)
+ *  GET    /api/worktree/list?pane_id= -> { worktrees: WorktreeEntry[] } (the linked worktrees of the pane's
+ *         repo, open or not; 400 missing_pane_id / pane_not_found, 409 not_a_git_repository or herdr's code)
+ *  POST   /api/worktree/open  { pane_id, path } -> WorktreeOpened (worktree.open of a checkout of the pane's
+ *         repo at the same path; a newly opened workspace is placed right after the pane's; 400
+ *         missing_path / pane_not_found, 409 not_a_git_repository or herdr's code when herdr refuses)
  *  POST   /api/worktree/remove  { workspace_id, force? } -> { ok: true } (closes the workspace and deletes
  *         its checkout, the branch stays; 409 dirty_worktree_requires_force on a dirty checkout without force)
  *  GET    /api/open-url                  -> OpenUrlTargets (Aside is offered only to a request from this PC itself)
@@ -446,6 +451,31 @@ export interface WorktreeCreated {
   pane_id: string;
   /** the checkout the root pane's shell runs in */
   cwd: string;
+}
+
+/** GET /api/worktree/list: a linked worktree of the pane's repo. */
+export interface WorktreeEntry {
+  /** the checkout folder, in the platform's form */
+  path: string;
+  /** null when the checkout's HEAD is detached */
+  branch: string | null;
+  /** null when no workspace has the checkout open */
+  open_workspace_id: string | null;
+  /** git can prune it: the checkout folder is gone */
+  prunable: boolean;
+}
+
+/** POST /api/worktree/open: a checkout of the pane's repo opened again as a workspace. */
+export interface WorktreeOpenRequest {
+  pane_id: string;
+  path: string;
+}
+
+/** POST /api/worktree/open: the checkout's workspace and its root pane; `already_open` when no new one was opened. */
+export interface WorktreeOpened {
+  workspace_id: string;
+  pane_id: string;
+  already_open: boolean;
 }
 
 /** POST /api/worktree/remove: `force` deletes a checkout with modified or untracked files. */

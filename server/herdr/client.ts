@@ -273,6 +273,50 @@ export async function worktreeCreate(
   return { workspace: created.workspace, tab: created.tab, root_pane: created.root_pane };
 }
 
+/** One checkout of a repo as `worktree.list` reports it; `open_workspace_id` is absent when no workspace has it open. */
+export interface HerdrWorktreeEntry {
+  branch?: string | null;
+  is_bare: boolean;
+  is_detached: boolean;
+  is_linked_worktree: boolean;
+  is_prunable: boolean;
+  label?: string | null;
+  /** forward slashes on Windows too */
+  path: string;
+  open_workspace_id?: string;
+}
+
+export interface WorktreeListResult {
+  source: { repo_key: string; repo_name: string; repo_root: string; source_checkout_path?: string | null; source_workspace_id?: string | null };
+  /** the main checkout as well as the linked worktrees */
+  worktrees: HerdrWorktreeEntry[];
+}
+
+/** Every checkout of the repo `cwd` is in, with the workspace that has it open. */
+export async function worktreeList(cwd: string, socketPath?: string): Promise<WorktreeListResult> {
+  const listed = await herdrRpc<WorktreeListResult & { type: "worktree_list" }>("worktree.list", { cwd }, socketPath);
+  return { source: listed.source, worktrees: listed.worktrees };
+}
+
+export interface WorktreeOpenResult {
+  /** the checkout already had a workspace: `root_pane` is its pane, nothing new was opened */
+  already_open: boolean;
+  root_pane: PaneInfo;
+  tab: TabInfo;
+  workspace?: WorkspaceInfo;
+}
+
+/** An existing checkout of the repo `cwd` is in, opened as a workspace (a new one unless it is open already). */
+export async function worktreeOpen(options: { cwd: string; path: string }, socketPath?: string): Promise<WorktreeOpenResult> {
+  const opened = await herdrRpc<WorktreeOpenResult>(
+    "worktree.open",
+    { cwd: options.cwd, path: options.path, focus: false },
+    socketPath,
+    WORKTREE_TIMEOUT_MS,
+  );
+  return { already_open: opened.already_open, root_pane: opened.root_pane, tab: opened.tab, ...(opened.workspace === undefined ? {} : { workspace: opened.workspace }) };
+}
+
 /** Closes a worktree workspace and deletes its checkout; the branch stays. A dirty checkout needs `force`. */
 export async function worktreeRemove(workspaceId: string, force: boolean, socketPath?: string): Promise<void> {
   await herdrRpc("worktree.remove", { workspace_id: workspaceId, force }, socketPath, WORKTREE_TIMEOUT_MS);
