@@ -300,7 +300,14 @@ try {
     }
     $start = Invoke-Installer @() (New-Vars @{ TW_TEST_EXIT_START = '1' })
     Assert-Equal 1 $start.Code 'start failure (herdr not ready)'
-    Assert-Contains $start.Err 'the TermWeave server keeps running: start herdr, then run:' 'guidance after a failed start'
+    Assert-Contains $start.Err "the TermWeave server keeps running: start herdr, then run: powershell -NoProfile -File `"$FixtureInstaller`" --check" 'guidance after a failed start'
+    Assert-True (-not $start.Err.Contains('--dir')) 'without --dir the guidance checks the default directory'
+    # A bare --check would inspect the default directory: the guidance names the install the run was given.
+    $dir = Join-Path $Work 'my install'
+    $startDir = Invoke-Installer @('--dir', $dir) (New-Vars @{ TW_TEST_EXIT_START = '1' })
+    Assert-Equal 1 $startDir.Code 'start failure with --dir'
+    Assert-Equal "install|--dir|$dir;start|--dir|$dir" (@($startDir.Records | ForEach-Object { Get-Argv $_ }) -join ';') 'install and start got the --dir'
+    Assert-Contains $startDir.Err "start herdr, then run: powershell -NoProfile -File `"$FixtureInstaller`" --check --dir `"$dir`"" 'guidance after a failed start keeps the --dir'
     Assert-Equal 3 (Invoke-Installer @('--stop') (New-Vars @{ TW_TEST_EXIT_STOP = '3' })).Code 'stop exit code'
   }
 

@@ -23,6 +23,8 @@ Usage: powershell -NoProfile -File install.ps1 [--check] [--yes] [--no-start] [-
 '@
 $SourceRoot = $PSScriptRoot
 $ScriptPath = $PSCommandPath
+# The recovery command the failure hints print. Invoke-Install appends --dir when one was given: a bare --check inspects the default directory.
+$CheckCommand = "powershell -NoProfile -File `"$ScriptPath`" --check"
 $OfficialBunInstaller = 'https://bun.sh/install.ps1'
 $OfficialHerdrInstaller = 'https://herdr.dev/install.ps1'
 # Mutating calls wait this long for another install.ps1 run of the same Windows user before failing.
@@ -182,7 +184,7 @@ function Wait-Child([System.Diagnostics.Process]$Process, [string]$What) {
     if (-not $finished) {
       Write-ErrLine "note  cancelled: waiting for $What to finish its own cleanup (nothing is killed)"
       $Process.WaitForExit()
-      Write-ErrLine "FAIL  cancelled; $What exited with $($Process.ExitCode). Check the state with: powershell -NoProfile -File `"$ScriptPath`" --check"
+      Write-ErrLine "FAIL  cancelled; $What exited with $($Process.ExitCode). Check the state with: $CheckCommand"
     }
   }
 }
@@ -308,7 +310,7 @@ function Invoke-Changing($Options, [string[]]$Common) {
   if ($code -ne 0) { return $code }
   if ($Options.NoStart) { Write-Line "ok    skipped start (--no-start). Start later: powershell -NoProfile -File `"$ScriptPath`""; return 0 }
   $code = Invoke-Lifecycle $bun $pathValue (@('start') + $Common)
-  if ($code -ne 0) { Write-ErrLine "note  see the lines above. When only herdr is not ready, the TermWeave server keeps running: start herdr, then run: powershell -NoProfile -File `"$ScriptPath`" --check" }
+  if ($code -ne 0) { Write-ErrLine "note  see the lines above. When only herdr is not ready, the TermWeave server keeps running: start herdr, then run: $CheckCommand" }
   return $code
 }
 function Invoke-Install([object[]]$Argv) {
@@ -320,7 +322,7 @@ function Invoke-Install([object[]]$Argv) {
     return 1
   }
   $common = @()
-  if ($null -ne $options.Dir) { $common += @('--dir', $options.Dir) }
+  if ($null -ne $options.Dir) { $common += @('--dir', $options.Dir); $script:CheckCommand += " --dir `"$($options.Dir)`"" }
   if ($null -ne $options.Port) { $common += @('--port', $options.Port) }
   if ($options.Check) {
     # Read only: no download, mutex, lock, log, file or registry write. The registry is read for the Path refresh only.

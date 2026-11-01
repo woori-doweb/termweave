@@ -294,7 +294,7 @@ export function install(options:Options,context:Context):number{
   if(judged.refused!=='missing parent')return fail(`cannot install into ${dir} (${judged.refused}). Pass --dir NEW_PATH`);
   try{mkdirSync(dirname(dir),{recursive:true});}catch{return fail(`cannot create ${dirname(dir)}`);}
  }
- context.out(`Installing dependencies and building into ${dir} (takes about a minute)...`);
+ context.out(`Installing dependencies and building into ${dir} (takes a few minutes)...`);
  try{installOwned(context.source,dir);}
  catch(error){return fail(`install failed (${error instanceof Error?error.message:String(error)}). The source checkout must be a clean git clone (no local edits): git status`);}
  if(!installed(dir))return fail('install did not finish');
