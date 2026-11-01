@@ -62,8 +62,10 @@ try {
   const click = async(id:string) => { await page.locator(`.pane-select[data-workspace-id="${id===a?own.workspace.workspace_id:other.workspace.workspace_id}"]`).click(); };
   const count = async(n:number) => { await page.waitForFunction(n=>document.querySelectorAll('.dock-group').length===n,n); };
   const saved = async(id:string) => page.evaluate(id=>JSON.parse(localStorage.getItem(`termweave:dock:workspace:v3:local:${encodeURIComponent(id)}`)!),id===a?own.workspace.workspace_id:other.workspace.workspace_id);
-  await page.getByRole('button',{name:'Split terminal right',exact:true}).first().click(); await count(2);
-  await page.getByRole('button',{name:'Split terminal below',exact:true}).first().click(); await count(3);
+  // A group's split actions live in its tools panel, closed by default.
+  const tools = async() => { const group=page.locator('.dock-group').first(); await group.getByRole('button',{name:'Terminal tools',exact:true}).click(); return group.getByRole('region',{name:'Terminal tools',exact:true}); };
+  await (await tools()).getByRole('button',{name:'Split terminal right',exact:true}).click(); await count(2);
+  await (await tools()).getByRole('button',{name:'Split terminal below',exact:true}).click(); await count(3);
   await page.waitForFunction(()=>Array.from(document.querySelectorAll('.dock-group')).every(g=>!!g.querySelector('.xterm-helper-textarea')));
   await page.getByRole('button',{name:'New terminal tab',exact:true}).first().waitFor();
   await page.waitForFunction(()=>Array.from(document.querySelectorAll<HTMLButtonElement>('.dock-tab-actions button')).filter(b=>b.textContent==='+').every(b=>!b.disabled));
@@ -93,7 +95,7 @@ try {
   await click(a); await count(3); assert.deepEqual((await saved(a)).tree,a3.tree);
   await page.waitForFunction(id=>(document.activeElement as HTMLElement)?.closest<HTMLElement>('.dock-group')?.dataset.paneId===id,focused);
   await click(b); await count(1);
-  await page.getByRole('button',{name:'Split terminal right',exact:true}).first().click(); await count(2);
+  await (await tools()).getByRole('button',{name:'Split terminal right',exact:true}).click(); await count(2);
   await page.waitForFunction(()=>Array.from(document.querySelectorAll<HTMLButtonElement>('.dock-tab-actions button')).filter(b=>b.textContent==='+').every(b=>!b.disabled));
   const bDivider=page.locator('.dock-divider').first(); await bDivider.focus(); await bDivider.press('ArrowLeft');
   await page.waitForTimeout(100);
@@ -121,7 +123,7 @@ try {
   let observed!:()=>void;
   const received=new Promise<void>(resolve=>{observed=resolve;});
   await page.route('**/api/pane/split',async route=>{ const response=await route.fetch(); observed(); await blocked; await route.fulfill({response}); });
-  await page.getByRole('button',{name:'Split terminal right',exact:true}).first().click();
+  await (await tools()).getByRole('button',{name:'Split terminal right',exact:true}).click();
   await received; await click(b); await count(2);
   assert.deepEqual((await saved(b)).tree,b2.tree);
   // Return before the pending response too; its completion must update the current A.
@@ -135,7 +137,7 @@ try {
   const blockedAway=new Promise<void>(resolve=>{releaseAway=resolve;});
   const receivedAway=new Promise<void>(resolve=>{observedAway=resolve;});
   await page.route('**/api/pane/split',async route=>{const response=await route.fetch();observedAway();await blockedAway;await route.fulfill({response});});
-  await page.getByRole('button',{name:'Split terminal right',exact:true}).first().click();
+  await (await tools()).getByRole('button',{name:'Split terminal right',exact:true}).click();
   await receivedAway; await click(b); await count(2); releaseAway();
   await page.waitForFunction(workspace=>{
     const value=JSON.parse(localStorage.getItem(`termweave:dock:workspace:v3:local:${encodeURIComponent(workspace)}`)!);

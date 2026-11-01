@@ -484,11 +484,11 @@ try {
     await createGate;
     await route.continue();
   });
-  await page.getByRole("button", { name: /^New session on / }).click();
-  const dialog = page.getByRole("dialog", { name: /^New session/ });
+  await page.getByRole("button", { name: /^New folder session on / }).click();
+  const dialog = page.getByRole("dialog", { name: /^New folder session/ });
   await dialog.getByLabel(/^Directory/).fill(root);
   await dialog.getByLabel(/^Name/).fill("herdr-web-ui-test-browser-created");
-  await dialog.getByRole("button", { name: "Start session", exact: true }).click();
+  await dialog.getByRole("button", { name: "Create folder session", exact: true }).click();
   await until(() => createRequests === 1, "creation started");
   await page.keyboard.press("Escape");
   assert.equal(await dialog.isVisible(), true, "in-flight creation cannot be dismissed");
@@ -655,14 +655,15 @@ try {
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).blur();
   await mobilePage.locator('button[aria-controls="workspace-drawer"]').click();
   await mobilePage.locator(`.pane-select[data-workspace-id="${workspaces[0]}"]`).click();
-  await mobilePage.getByRole("textbox", { name: "Message", exact: true }).waitFor();
+  // terminal first on every screen (App.tsx storedView): a pane with no chat choice opens in its terminal lens
+  await mobilePage.locator(`.view-switch button[aria-pressed="true"][title="Live terminal (${VIEW_KEY})"]`).waitFor();
   await mobilePage.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await mobilePage.waitForTimeout(NO_SEND_WAIT_MS);
   assert.equal(await typing(mobilePage), false, "a pane picked on a phone does not take the keyboard");
-  await mobilePage.getByTitle(`Live terminal (${VIEW_KEY})`, { exact: true }).click();
+  await mobilePage.getByTitle(`Chat transcript (${VIEW_KEY})`, { exact: true }).click();
+  await mobilePage.getByRole("textbox", { name: "Message", exact: true }).waitFor();
   await mobilePage.waitForTimeout(NO_SEND_WAIT_MS);
   assert.equal(await typing(mobilePage), false, "nor does switching its lens");
-  await mobilePage.getByTitle(`Chat transcript (${VIEW_KEY})`, { exact: true }).click();
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).tap();
   await until(() => typing(mobilePage), "a tap on the message box takes the keyboard");
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).blur();

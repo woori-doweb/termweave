@@ -71,6 +71,8 @@ try {
   };
   const drag = async (id: string, selector: string, x: number, y: number) => {
     const count = inputs.length;
+    // three tabs overflow a half-width strip: its end scrolls into view before the drag, as a person scrolls to it
+    await page.locator(selector).scrollIntoViewIfNeeded();
     await start(id);
     const box = await page.locator(selector).boundingBox(); assert.ok(box);
     await page.mouse.move(box.x + box.width * x, box.y + box.height * y, { steps: 25 });
@@ -139,8 +141,12 @@ try {
   passed.push("foreign-and-forged-payload-rejected");
   await page.locator('[data-group-id="a"] .xterm-helper-textarea').focus(); await page.waitForTimeout(500);
   // The existing file-input helper expects a single visible terminal and its socket.
-  await page.locator('[data-group-id="a"]').getByRole("button", { name: "Zoom", exact: true }).click();
+  // Zoom and Restore layout sit in the group's tools panel; zooming remounts the group, which closes it
+  const groupA = page.locator('[data-group-id="a"]');
+  await groupA.getByRole("button", { name: "Terminal tools", exact: true }).click();
+  await groupA.getByRole("button", { name: "Zoom", exact: true }).click();
   await page.waitForTimeout(500); assert.ok(socket); await checkTerminalFileInput(page, socket);
+  await groupA.getByRole("button", { name: "Terminal tools", exact: true }).click();
   await page.getByRole("button", { name: "Restore layout", exact: true }).click();
   assert.equal(JSON.stringify(await stored()), saved); await invariant(); passed.push("native-text-file-drop-and-paste-preserved");
   const divider = page.locator('.dock-divider').first(); await divider.focus(); await page.keyboard.press("ArrowRight");

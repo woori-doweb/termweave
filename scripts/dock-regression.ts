@@ -44,14 +44,22 @@ try {
     await page.mouse.move(box.x + box.width * x, box.y + box.height * y, { steps: 20 });
     await page.mouse.move(box.x + box.width * x, box.y + box.height * y); await page.mouse.up();
   };
+  // A group's secondary actions live in its tools panel, closed by default.
+  const tools = async (group: import("playwright-core").Locator) => {
+    await group.getByRole("button", { name: "Terminal tools", exact: true }).click();
+    const panel = group.getByRole("region", { name: "Terminal tools", exact: true }); await panel.waitFor(); return panel;
+  };
+  const closeTools = async (panel: import("playwright-core").Locator) => {
+    await panel.getByRole("button", { name: "Close", exact: true }).click(); await panel.waitFor({ state: "detached" });
+  };
   await page.waitForTimeout(300);
   await drag(1, 0); await page.waitForFunction(() => document.querySelectorAll(".dock-group").length === 3);
   const first = page.locator(".dock-group").first(); assert.equal(await first.getByRole("tab").count(), 2);
-  // the keyboard layout lives in the group's tools panel, closed by default
-  await first.getByRole("button", { name: "Terminal tools", exact: true }).click();
-  await first.getByText("Keyboard layout", { exact: true }).click();
-  await first.getByRole("button", { name: "Move tab earlier", exact: true }).click();
+  const keyboard = await tools(first);
+  await keyboard.getByText("Keyboard layout", { exact: true }).click();
+  await keyboard.getByRole("button", { name: "Move tab earlier", exact: true }).click();
   assert.equal(await first.getByRole("tab").first().getAttribute("data-tab-id"), ids[1]!);
+  await closeTools(keyboard);
   await drag(1, 0, 0.98, 0.5); assert.equal(await page.locator(".dock-group").count(), 4);
   for (const axis of ["columns", "rows"] as const) {
     const divider = page.locator(`.dock-divider-${axis}`).first(); const box = await divider.boundingBox(); assert.ok(box);
@@ -66,9 +74,9 @@ try {
     assert.equal(await divider.getAttribute("aria-valuenow"), start);
   }
   const stored = await page.evaluate(() => localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith("termweave:dock:v1:"))!));
-  await page.locator(".dock-group").first().getByRole("button", { name: "Zoom", exact: true }).click();
+  await (await tools(page.locator(".dock-group").first())).getByRole("button", { name: "Zoom", exact: true }).click();
   assert.equal(await page.locator(".dock-group").count(), 1);
-  await page.getByRole("button", { name: "Restore layout", exact: true }).click(); assert.equal(await page.locator(".dock-group").count(), 4);
+  await (await tools(page.locator(".dock-group"))).getByRole("button", { name: "Restore layout", exact: true }).click(); assert.equal(await page.locator(".dock-group").count(), 4);
   ready.clear(); await page.reload(); await page.locator(".conn-live:visible").waitFor(); assert.equal(await page.locator(".dock-group").count(), 4);
   assert.equal(await page.evaluate(() => localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith("termweave:dock:v1:"))!)), stored);
   const active = await page.locator(".dock-group").first().getAttribute("data-pane-id");
@@ -82,7 +90,7 @@ try {
     for (const key of ["pane_id", "terminal_id", "workspace_id", "tab_id", "cwd"] as const) assert.equal(next[key], old[key]);
   }
   const popupPromise = page.waitForEvent("popup");
-  await page.locator(".dock-group").first().getByRole("button", { name: "Open separate browser view", exact: true }).click();
+  await (await tools(page.locator(".dock-group").first())).getByRole("button", { name: "Open separate browser view", exact: true }).click();
   const popup = await popupPromise; await popup.locator(".conn-live:visible").waitFor();
   await popup.waitForFunction(id => document.querySelector(".dock-group")?.getAttribute("data-pane-id") === id, active);
   assert.equal((await sessionSnapshot()).panes.length, after.panes.length);
@@ -112,10 +120,12 @@ try {
   assert.equal(await page.locator(".dock-group").getByRole("tab").count(), 2);
   assert.equal((await sessionSnapshot()).panes.length, after.panes.length + 1);
   await page.unroute("**/api/pane/split");
-  await page.locator(".dock-group").first().getByText("Search terminal output", { exact: true }).click();
-  await page.locator(".dock-group").first().getByLabel("Terminal search query").fill("after-drag-resize");
-  await page.locator(".dock-group").first().getByRole("button", { name: "Search", exact: true }).click();
+  const search = await tools(page.locator(".dock-group").first());
+  await search.getByText("Search terminal output", { exact: true }).click();
+  await search.getByLabel("Terminal search query").fill("after-drag-resize");
+  await search.getByRole("button", { name: "Search", exact: true }).click();
   await page.locator(".dock-search [role=status]").first().waitFor();
+  await closeTools(search);
   // Rapid view remounts must release sockets and settle deferred xterm work.
   const liveSockets = new Set<import("playwright-core").WebSocket>();
   page.on("websocket", socket => { liveSockets.add(socket); socket.on("close", () => liveSockets.delete(socket)); });
@@ -128,13 +138,14 @@ try {
   assert.ok(liveSockets.size <= 1, `leaked WebSockets: ${liveSockets.size}`);
   assert.equal((await sessionSnapshot()).panes.length, paneCount);
   assert.deepEqual(errors, []);
-  await page.getByRole("button", { name: "Split terminal right", exact: true }).first().click();
+  await (await tools(page.locator(".dock-group").first())).getByRole("button", { name: "Split terminal right", exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll(".dock-group").length === 2);
   // A committed tree can precede the refresh/focus stage of the same creation.
   // The next user action starts only once that transaction has released its lock.
-  await page.getByRole("button", { name: "Split terminal below", exact: true }).first().waitFor({ state: "visible" });
+  const below = (await tools(page.locator(".dock-group").first())).getByRole("button", { name: "Split terminal below", exact: true });
+  await below.waitFor({ state: "visible" });
   await page.waitForFunction(() => !document.querySelector<HTMLButtonElement>('[aria-label="Split terminal below"]')?.disabled);
-  await page.getByRole("button", { name: "Split terminal below", exact: true }).first().click();
+  await below.click();
   await page.waitForFunction(() => document.querySelectorAll(".dock-group").length === 3);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForFunction(() => document.querySelectorAll(".dock-group").length === 1);

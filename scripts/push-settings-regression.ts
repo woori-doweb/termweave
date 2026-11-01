@@ -88,6 +88,8 @@ export async function checkPushSettings(browser: Browser, origin: string): Promi
     assert.equal(tests.length, beforeMissing);
 
     await page.getByRole("button", { name: "Close settings", exact: true }).click();
+    // at 390px the header folds its tools, the bell among them, behind "More tools"
+    await page.getByRole("button", { name: "More tools", exact: true }).click();
     await page.locator(".bell-button").click();
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+Comma" : "Control+Shift+Comma");
     assert.equal(await send.isDisabled(), true, "testing must not turn alerts on implicitly");
