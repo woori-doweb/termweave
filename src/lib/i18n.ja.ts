@@ -8,6 +8,15 @@
  * in English. Placeholders in braces keep their English names.
  */
 export const JA: Record<string, string> = {
+  "Add team folder": "チームフォルダーを追加",
+  "Add team folder in {name}": "{name} 内にチームフォルダーを追加",
+  "Rename team folder {name}": "チームフォルダー {name} の名前を変更",
+  "Remove team folder {name} without closing terminals": "ターミナルを残してチームフォルダー {name} を削除",
+  "Team folder name": "チームフォルダー名",
+  "Team folder for {name}": "{name} のチームフォルダー",
+  "No team folder": "チームフォルダーなし",
+  "Team folders are not saved. Browser storage is unavailable.": "ブラウザーのストレージを利用できないため、チームフォルダーを保存できませんでした。",
+  "Save": "保存",
   "Delete": "削除",
   "Rename terminal": "ターミナル名を変更",
   "Rename terminal {id}": "ターミナル {id} の名前を変更",
@@ -465,6 +474,8 @@ export const JA: Record<string, string> = {
   "Remove {file}": "{file} を削除",
   "Message": "メッセージ",
   "Attach files": "ファイルを添付",
+  "Attach image": "画像を添付",
+  "Could not attach the image. Try again.": "画像を添付できませんでした。もう一度お試しください。",
   "Queue message": "メッセージをキューに追加",
   "Send now": "今すぐ送信",
   "Queue as the next message": "次のメッセージとしてキューに追加",
@@ -1132,6 +1143,7 @@ export const JA: Record<string, string> = {
   "Task recorded, but agent notification failed. Check the task list without resubmitting.": "タスクは記録しましたが、エージェントへの通知に失敗しました。再登録せずタスク一覧を確認してください。",
   "{seat} → P{number} · verified when opened": "{seat} → P{number}・開いた時点で確認済み",
   "Terminal inbox": "ターミナル通知",
+  "More tools": "その他のツール",
   "Messages from terminal programs. Messages do not confirm task completion.": "ターミナルのプログラムからのメッセージです。作業の完了を保証するものではありません。",
   "Could not refresh the inbox. Previously loaded messages may be out of date.": "通知を更新できませんでした。表示中のメッセージは最新ではない可能性があります。",
   "The terminal could not be verified. Refresh the inbox before trying again.": "現在のターミナルを確認できませんでした。通知を更新して確認してください。",

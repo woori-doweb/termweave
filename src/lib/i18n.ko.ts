@@ -6,6 +6,15 @@
  * braces keep their English names.
  */
 export const KO: Record<string, string> = {
+  "Add team folder": "팀 폴더 추가",
+  "Add team folder in {name}": "{name} 안에 팀 폴더 추가",
+  "Rename team folder {name}": "{name} 팀 폴더 이름 변경",
+  "Remove team folder {name} without closing terminals": "터미널을 유지하고 {name} 팀 폴더 삭제",
+  "Team folder name": "팀 폴더 이름",
+  "Team folder for {name}": "{name} 패널의 팀 폴더",
+  "No team folder": "팀 폴더 없음",
+  "Team folders are not saved. Browser storage is unavailable.": "브라우저 저장소를 사용할 수 없어 팀 폴더를 저장하지 못했습니다.",
+  "Save": "저장",
   "Delete": "삭제",
   "Rename terminal": "터미널 이름 변경",
   "Rename terminal {id}": "터미널 {id} 이름 변경",
@@ -468,6 +477,8 @@ export const KO: Record<string, string> = {
   "Remove {file}": "{file} 제거",
   "Message": "메시지",
   "Attach files": "파일 첨부",
+  "Attach image": "이미지 첨부",
+  "Could not attach the image. Try again.": "이미지를 첨부하지 못했습니다. 다시 시도해 주세요.",
   "Queue message": "메시지 대기열에 넣기",
   "Send now": "지금 보내기",
   "Queue as the next message": "다음 메시지로 대기",
@@ -1135,6 +1146,7 @@ export const KO: Record<string, string> = {
   "Task recorded, but agent notification failed. Check the task list without resubmitting.": "작업은 기록했지만 에이전트 알림에 실패했습니다. 중복 등록하지 말고 작업 목록을 확인해 주십시오.",
   "{seat} → P{number} · verified when opened": "{seat} → P{number} · 열 때 확인됨",
   "Terminal inbox": "터미널 알림함",
+  "More tools": "도구 더보기",
   "Messages from terminal programs. Messages do not confirm task completion.": "터미널 프로그램이 보낸 메시지입니다. 메시지만으로 작업 완료를 확인할 수는 없습니다.",
   "Could not refresh the inbox. Previously loaded messages may be out of date.": "알림함을 새로 불러오지 못했습니다. 기존 메시지는 최신 상태가 아닐 수 있습니다.",
   "The terminal could not be verified. Refresh the inbox before trying again.": "현재 터미널을 확인하지 못했습니다. 알림함을 새로 불러온 후 확인하십시오.",

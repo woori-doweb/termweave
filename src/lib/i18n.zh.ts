@@ -10,6 +10,15 @@
  * Placeholders in braces keep their English names.
  */
 export const ZH: Record<string, string> = {
+  "Add team folder": "添加团队文件夹",
+  "Add team folder in {name}": "在 {name} 中添加团队文件夹",
+  "Rename team folder {name}": "重命名团队文件夹 {name}",
+  "Remove team folder {name} without closing terminals": "删除团队文件夹 {name} 并保留终端",
+  "Team folder name": "团队文件夹名称",
+  "Team folder for {name}": "{name} 的团队文件夹",
+  "No team folder": "无团队文件夹",
+  "Team folders are not saved. Browser storage is unavailable.": "浏览器存储不可用，未能保存团队文件夹。",
+  "Save": "保存",
   "Delete": "删除",
   "Rename terminal": "重命名终端",
   "Rename terminal {id}": "重命名终端 {id}",
@@ -467,6 +476,8 @@ export const ZH: Record<string, string> = {
   "Remove {file}": "移除 {file}",
   "Message": "消息",
   "Attach files": "附加文件",
+  "Attach image": "附加图片",
+  "Could not attach the image. Try again.": "无法附加图片，请重试。",
   "Queue message": "将消息加入队列",
   "Send now": "立即发送",
   "Queue as the next message": "作为下一条消息排队",
@@ -1134,6 +1145,7 @@ export const ZH: Record<string, string> = {
   "Task recorded, but agent notification failed. Check the task list without resubmitting.": "任务已记录，但代理通知失败。请检查任务列表，不要重复提交。",
   "{seat} → P{number} · verified when opened": "{seat} → P{number} · 打开时已验证",
   "Terminal inbox": "终端通知",
+  "More tools": "更多工具",
   "Messages from terminal programs. Messages do not confirm task completion.": "以下消息由终端程序发出，不代表任务已完成。",
   "Could not refresh the inbox. Previously loaded messages may be out of date.": "无法刷新通知。已显示的消息可能不是最新状态。",
   "The terminal could not be verified. Refresh the inbox before trying again.": "无法确认当前终端。请刷新通知后查看。",

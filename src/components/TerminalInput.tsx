@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
-import { CornerDownLeft, SendHorizontal } from "lucide-react";
+import { CornerDownLeft, ImagePlus, SendHorizontal } from "lucide-react";
 
 import "./TerminalInput.css";
 import { readTerminalDraft, writeTerminalDraft, TERMINAL_LINE_LIMIT, subscribeTerminalDraft, terminalDraftSending, setTerminalDraftSending, acknowledgeTerminalDraft } from "../lib/terminalDraft.ts";
 
 import { useT } from "../lib/i18n.ts";
 import { useSettings } from "../lib/settings.ts";
+import { useMachineApi } from "../lib/machineContext.tsx";
 import { MicButton, VoiceRecordingPill, useDictation } from "./VoiceInput.tsx";
 
 export interface TerminalInputProps {
   owner: string;
+  /** the pane an attached image is saved beside */
+  paneId: string;
   onComposing?: (active: boolean) => void;
   connected: boolean;
   /** true: sent, clear the line; a string: keep the text and say why; false: not sent (offline) */
@@ -27,7 +30,7 @@ const MAX_ROWS = 4;
  * cannot take back keys it already sent: every revision arrived as more text. Here the line
  * is written with the keyboard's own editing and goes to the pane whole, then Enter.
  */
-export function TerminalInput({ owner, connected, onSend, onEnter, onComposing }: TerminalInputProps) {
+export function TerminalInput({ owner, paneId, connected, onSend, onEnter, onComposing }: TerminalInputProps) {
   const t = useT();
   const text = useSyncExternalStore(subscribeTerminalDraft, () => readTerminalDraft(owner));
   const setText = useCallback((value: string | ((previous: string) => string)) => {
@@ -68,9 +71,29 @@ export function TerminalInput({ owner, connected, onSend, onEnter, onComposing }
     onNote: setNote,
   });
 
+  // a phone has no drop or file paste: pick photos, save them beside the pane, and put their
+  // quoted paths in the line so a message can go with them (the agent reads a path as an image)
+  const { uploadPaneImage } = useMachineApi();
+  const picker = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const attach = async (files: File[]): Promise<void> => {
+    if (files.length === 0) return;
+    setUploading(true); setNote(null);
+    try {
+      const paths: string[] = [];
+      for (const file of files) paths.push(await uploadPaneImage(paneId, file));
+      const quoted = paths.map((path) => `'${path.replaceAll("'", "'\\''")}'`).join(" ");
+      setText((previous) => `${previous}${previous && !/\s$/.test(previous) ? " " : ""}${quoted} `);
+    } catch {
+      setNote(t("Could not attach the image. Try again."));
+    } finally { setUploading(false); }
+  };
+
   const send = useCallback(() => {
     if (!connected || terminalDraftSending(owner) || composing.current) return;
     setNote(null);
+    // the stored line, not this render's: a send that waited for an IME commit runs before the re-render
+    const text = readTerminalDraft(owner);
     if (text.length === 0) {
       if (!onEnter()) setNote(t("Not sent: the terminal is disconnected."));
       return;
@@ -87,7 +110,29 @@ export function TerminalInput({ owner, connected, onSend, onEnter, onComposing }
         acknowledgeTerminalDraft(owner);
       } else setNote(result);
     }).catch(() => setNote(t("Not confirmed. Check the terminal before sending again."))).finally(() => { setTerminalDraftSending(owner, false); });
-  }, [connected, dictation.forget, onEnter, onSend, owner, setText, t, text]);
+  }, [connected, dictation.forget, onEnter, onSend, owner, t]);
+
+  // A phone keyboard keeps the last syllable open, and the button keeps focus in the box, so a
+  // tap on Send arrived mid-composition and was dropped. Commit the syllable first, then send.
+  const sendLatest = useRef(send);
+  sendLatest.current = send;
+  const sendAfterCommit = useRef(false);
+  const finishCommitSend = useCallback(() => {
+    if (!sendAfterCommit.current) return;
+    sendAfterCommit.current = false;
+    composing.current = false;
+    composingCallback.current?.(false);
+    setTimeout(() => sendLatest.current(), 0); // after the commit's input event
+  }, []);
+  const onSendClick = (): void => {
+    if (!composing.current) { send(); return; }
+    sendAfterCommit.current = true;
+    const element = box.current;
+    element?.blur(); // ends the composition: compositionend, then the committed text
+    element?.focus({ preventScroll: true });
+    // ponytail: a keyboard that never reports compositionend on blur sends what the box shows
+    setTimeout(finishCommitSend, 250);
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     // Enter sends; Shift+Enter breaks the line; an IME keeps its Enter, including the committing
@@ -121,7 +166,7 @@ export function TerminalInput({ owner, connected, onSend, onEnter, onComposing }
         value={text}
         maxLength={TERMINAL_LINE_LIMIT}
         onCompositionStart={() => { composing.current = true; onComposing?.(true); }}
-        onCompositionEnd={() => { composing.current = false; onComposing?.(false); }}
+        onCompositionEnd={() => { composing.current = false; onComposing?.(false); finishCommitSend(); }}
         placeholder={t("Type for the terminal…")}
         aria-label={t("Terminal input line")}
         enterKeyHint="send"
@@ -129,6 +174,15 @@ export function TerminalInput({ owner, connected, onSend, onEnter, onComposing }
         onChange={(event) => { setText(event.target.value); setNote(null); }}
         onKeyDown={onKeyDown}
       />
+      <input ref={picker} type="file" accept="image/*" multiple hidden onChange={(event) => {
+        const picked = Array.from(event.currentTarget.files ?? []);
+        event.currentTarget.value = "";
+        void attach(picked);
+      }} />
+      <button type="button" className="terminal-input-attach" aria-label={t(uploading ? "Uploading file…" : "Attach image")} title={t("Attach image")}
+        disabled={!connected || uploading || sending} onPointerDown={(event) => event.preventDefault()} onClick={() => picker.current?.click()}>
+        <ImagePlus aria-hidden="true" />
+      </button>
       {dictation.shown && <MicButton dictation={dictation} className="terminal-input-mic" />}
       <button
         type="button"
@@ -138,7 +192,7 @@ export function TerminalInput({ owner, connected, onSend, onEnter, onComposing }
         disabled={!connected || sending}
         // the soft keyboard stays up for the next line
         onPointerDown={(event) => event.preventDefault()}
-        onClick={send}
+        onClick={onSendClick}
       >
         {text.length === 0 ? <CornerDownLeft aria-hidden="true" /> : <SendHorizontal aria-hidden="true" />}
       </button>
