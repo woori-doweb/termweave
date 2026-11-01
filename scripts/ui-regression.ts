@@ -727,12 +727,15 @@ try {
   await touchPage.waitForTimeout(NO_SEND_WAIT_MS);
   assert.equal(touchSent.length, imeSent);
   assert.equal(await line.inputValue(), "echo 한글");
+  // Send during an unfinished composition commits it and sends the line once, and the line clears
   await line.dispatchEvent("compositionstart", { data: "" });
   const beforeComposeSend = touchSent.length;
   await touchPage.getByRole("button", { name: "Send to the terminal", exact: true }).click();
-  await touchPage.waitForTimeout(NO_SEND_WAIT_MS);
-  assert.equal(touchSent.length, beforeComposeSend, "button cannot submit an unfinished composition");
+  await until(async () => (await line.inputValue()) === "", "the line sent during composition cleared");
   await line.dispatchEvent("compositionend", { data: "한글" });
+  await touchPage.waitForTimeout(NO_SEND_WAIT_MS);
+  assert.deepEqual(touchSent.slice(beforeComposeSend).map(({ type, pane_id, text }) => ({ type, pane_id, text })),
+    [{ type: "submit", pane_id: paneB, text: "echo 한글" }], "Send during composition sends the committed line once");
   await line.fill("");
   // an empty line's button is Enter alone
   const enters = touchSent.length;

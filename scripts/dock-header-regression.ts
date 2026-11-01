@@ -8,6 +8,7 @@ import { chromium } from "playwright-core";
 import { createServer } from "../server/index.ts";
 import { workspaceCreate, workspaceClose, herdrRpc, sessionSnapshot } from "../server/herdr/client.ts";
 import { UsageService } from "../server/usage.ts";
+import { cwdSpelling } from "./pane-shell.ts";
 
 assert.ok(process.env.TERMWEAVE_TEST_ROOT && process.env.HERDR_TEST_SESSION && !process.env.HERDR_TEST_LIVE);
 const root = mkdtempSync(join(tmpdir(), "termweave-header-"));
@@ -89,12 +90,11 @@ try {
   }), "title changes must reveal the active tab");
   await page.screenshot({ path: process.env.DOCK_HEADER_SCREENSHOT ?? join(root, "header.png") });
   const after = await sessionSnapshot();
-  // Windows herdr first reports a new pane's cwd as `C:\dir\` and later as `C:\dir`: one directory, two spellings
-  const spelling = (key: string, value: unknown) => key === "cwd" && process.platform === "win32" && typeof value === "string" ? value.replace(/\\+$/, "") : value;
   for (const id of ids) {
     const old = before.panes.find(pane => pane.pane_id === id)!;
     const next = after.panes.find(pane => pane.pane_id === id)!;
-    for (const key of ["pane_id", "terminal_id", "workspace_id", "tab_id", "cwd"] as const) assert.equal(spelling(key, next[key]), spelling(key, old[key]));
+    for (const key of ["pane_id", "terminal_id", "workspace_id", "tab_id"] as const) assert.equal(next[key], old[key]);
+    assert.equal(cwdSpelling(next.cwd), cwdSpelling(old.cwd));
   }
   await page.setViewportSize({ width: 1440, height: 950 });
   const sidebar = page.locator('.sidebar');

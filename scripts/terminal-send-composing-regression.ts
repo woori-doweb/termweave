@@ -8,12 +8,12 @@ import { chromium } from "playwright-core";
 import { createServer } from "../server/index.ts";
 import { workspaceCreate, workspaceClose, paneSendText } from "../server/herdr/client.ts";
 import { chromiumExecutable } from "./browser.ts";
+import { runInPane } from "./pane-shell.ts";
 
 const root = mkdtempSync(join(tmpdir(), "termweave-send-composing-"));
 const received = join(root, "received.bin");
 const ready = join(root, "ready");
 const script = join(root, "capture.cjs");
-const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 writeFileSync(received, "");
 writeFileSync(script, `const fs=require('node:fs'); process.stdin.setRawMode(true); process.stdout.write('ready\\r\\n'); fs.writeFileSync(${JSON.stringify(ready)},'ready'); process.stdin.on('data',b=>fs.appendFileSync(${JSON.stringify(received)},b));`);
 const server = createServer({ port: 0, hostname: "127.0.0.1", token: "", stateDir: join(root, "state") });
@@ -27,10 +27,7 @@ try {
   const created = await workspaceCreate({ cwd: root, label: "termweave-test-send-composing" });
   workspace = created.workspace.workspace_id;
   const pane = created.root_pane.pane_id;
-  // a Windows pane runs PowerShell: its call operator starts node, single quotes double inside
-  const psQuote = (value: string) => "'" + value.replaceAll("'", "''") + "'";
-  const node = Bun.which("node")!;
-  await paneSendText(pane, process.platform === "win32" ? `& ${psQuote(node)} ${psQuote(script)}\r` : `exec ${quote(node)} ${quote(script)}\r`);
+  await paneSendText(pane, `${runInPane(Bun.which("node")!, script)}\r`);
   await until(() => existsSync(ready), "capture process was not ready");
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "en-US" });
   await context.addInitScript((pane) => {

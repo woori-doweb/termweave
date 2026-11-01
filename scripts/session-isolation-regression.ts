@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { chromium } from 'playwright-core';
 import { createServer } from '../server/index.ts';
 import { herdrRpc, paneSendText, sessionSnapshot, workspaceCreate, workspaceClose } from '../server/herdr/client.ts';
+import { cwdSpelling, shellProcesses, submitted, writeShellPid } from './pane-shell.ts';
 
 if (!process.env.HERDR_TEST_SESSION || process.env.HERDR_TEST_LIVE === '1' || !process.env.HERDR_STAGING_DIST) throw new Error('isolated staging required');
 const root = mkdtempSync(join(tmpdir(), 'session-isolation-owned-'));
@@ -74,12 +75,12 @@ try {
   const before = (await sessionSnapshot()).panes.filter(p=>p.workspace_id===own.workspace.workspace_id);
   // Only this test's fresh shells receive PID probes; never type into user terminals.
   for (const [i,p] of before.entries()) {
-    await paneSendText(p.pane_id, `printf '%s' $$ > '${root}/pid-${i}'\n`);
+    await paneSendText(p.pane_id, submitted(writeShellPid(`${root}/pid-${i}`), '\n'));
     const deadline=Date.now()+10000;
     while(!existsSync(join(root,`pid-${i}`))) { assert.ok(Date.now()<deadline); await Bun.sleep(50); }
   }
   const pids=before.map((_,i)=>Number(readFileSync(join(root,`pid-${i}`),'utf8')));
-  const processes=async()=>{const result=await Bun.$`ps -o pid=,ppid=,lstart= -p ${pids.join(',')}`.quiet(); assert.equal(result.exitCode,0);return result.text();};
+  const processes=()=>shellProcesses(pids);
   const identity=await processes();
   const divider = page.locator('.dock-divider').first();
   const box = await divider.boundingBox(); assert.ok(box);
@@ -148,7 +149,7 @@ try {
   assert.equal(await page.locator(`.pane-select[data-workspace-id="${other.workspace.workspace_id}"]`).getAttribute('aria-current'),'true');
   await click(a); await count(4); await page.unroute('**/api/pane/split');
   const after=await sessionSnapshot();
-  for(const p of before) {const current=after.panes.find(x=>x.pane_id===p.pane_id)!; for(const k of ['terminal_id','cwd','workspace_id','tab_id'] as const) assert.equal(current[k],p[k]);}
+  for(const p of before) {const current=after.panes.find(x=>x.pane_id===p.pane_id)!; for(const k of ['terminal_id','workspace_id','tab_id'] as const) assert.equal(current[k],p[k]); assert.equal(cwdSpelling(current.cwd),cwdSpelling(p.cwd));}
   assert.equal(await processes(),identity);
   await rows();
   assert.deepEqual(await page.evaluate(()=>Object.fromEntries(Object.keys(localStorage).filter(k=>k.includes('dock:session:v2:')||k.includes('dock:v1:')).map(k=>[k,localStorage.getItem(k)]))),legacy);

@@ -9,6 +9,7 @@ import { createServer } from "../server/index.ts";
 import { workspaceCreate, workspaceClose, sessionSnapshot, herdrRpc, paneSendText } from "../server/herdr/client.ts";
 import { UsageService } from "../server/usage.ts";
 import { checkTerminalFileInput } from "./terminal-file-input-regression.ts";
+import { cwdSpelling, shellProcesses, submitted, writeShellPid } from "./pane-shell.ts";
 
 assert.ok(process.env.HERDR_STAGING_DIST && process.env.HERDR_TEST_SESSION && !process.env.HERDR_TEST_LIVE, "isolated staging only");
 const evidence = resolve(process.env.DOCK_EVIDENCE ?? "evidence/title-drag-20261004");
@@ -24,16 +25,13 @@ try {
   for (let i = 0; i < 3; i++) ids.push((await herdrRpc<{ pane: { pane_id: string } }>("pane.split", { target_pane_id: ids[0], direction: "right", cwd: root, focus: false })).pane.pane_id);
   // Only our just-created panes receive commands. Record each live shell's actual PID.
   for (const [i, id] of ids.entries()) {
-    await paneSendText(id, `printf '%s' $$ > '${root}/pid-${i}'\n`);
+    await paneSendText(id, submitted(writeShellPid(`${root}/pid-${i}`), "\n"));
     const deadline = Date.now() + 10000;
     while (!existsSync(join(root, `pid-${i}`))) { assert.ok(Date.now() < deadline, "shell PID not recorded"); await Bun.sleep(50); }
   }
   const pids = ids.map((_, i) => Number(readFileSync(join(root, `pid-${i}`), "utf8")));
   pids.forEach(pid => { assert.ok(pid > 1); process.kill(pid, 0); });
-  const processIdentity = async () => {
-    const result = await Bun.$`ps -o pid=,ppid=,lstart= -p ${pids.join(",")}`.quiet();
-    assert.equal(result.exitCode, 0); return result.text();
-  };
+  const processIdentity = () => shellProcesses(pids);
   const processesBefore = await processIdentity();
   const before = await sessionSnapshot();
   server = createServer({ port: 0, hostname: "127.0.0.1", token: "", stateDir: root, usage: new UsageService(undefined, []) });
@@ -162,7 +160,8 @@ try {
   const after = await sessionSnapshot();
   for (const [i, id] of ids.entries()) {
     const old = before.panes.find(pane => pane.pane_id === id)!, next = after.panes.find(pane => pane.pane_id === id)!;
-    for (const field of ["pane_id", "terminal_id", "workspace_id", "tab_id", "cwd"] as const) assert.equal(next[field], old[field]);
+    for (const field of ["pane_id", "terminal_id", "workspace_id", "tab_id"] as const) assert.equal(next[field], old[field]);
+    assert.equal(cwdSpelling(next.cwd), cwdSpelling(old.cwd));
     process.kill(pids[i]!, 0);
   }
   const processesAfter = await processIdentity(); assert.equal(processesAfter, processesBefore, 'shell PID, parent and start time unchanged');

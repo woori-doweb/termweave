@@ -65,11 +65,19 @@ export async function checkTerminalInput(browser: Browser, origin: string, pane:
     await line.waitFor();
     assert.equal(await line.inputValue(), "draft 한글 😀");
 
+    // Send during an unfinished composition commits it and submits the line once; no compositionend
+    // comes here, so the box's text goes after the fallback wait
     await line.dispatchEvent("compositionstart", { data: "" });
     await page.getByRole("button", { name: "Send to the terminal", exact: true }).click();
+    await until(() => !!acknowledge);
+    acknowledge!();
+    acknowledge = undefined;
+    await until(async () => (await line.inputValue()) === "");
     await page.waitForTimeout(100);
-    assert.equal(sent.length, 0, "unfinished composition must not submit via button");
+    assert.deepEqual(sent.map(({ type, text }) => ({ type, text })), [{ type: "submit", text: "draft 한글 😀" }], "Send during composition submits the committed line once");
     // Leaving during composition must not leave the composition guard stuck.
+    await line.fill("draft 한글 😀");
+    await line.dispatchEvent("compositionstart", { data: "" });
     await page.getByTitle(`Chat transcript (${VIEW_KEY})`, { exact: true }).click();
     await page.getByTitle(`Live terminal (${VIEW_KEY})`, { exact: true }).click();
     await remountLine();
@@ -83,7 +91,7 @@ export async function checkTerminalInput(browser: Browser, origin: string, pane:
     acknowledge!();
     await until(async () => !(await page.getByRole("button", { name: "Send to the terminal", exact: true }).isDisabled()));
     assert.equal(await line.inputValue(), "draft 한글 😀", "late ack cannot erase replacement text");
-    assert.equal(sent.length, 1);
+    assert.equal(sent.length, 2);
 
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+Comma" : "Control+Shift+Comma");
     const shortcut = page.getByRole("combobox", { name: "Command palette", exact: true });

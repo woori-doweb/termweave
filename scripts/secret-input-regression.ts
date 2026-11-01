@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright-core";
 import { createServer } from "../server/index.ts";
 import { paneSendText, workspaceCreate, workspaceClose } from "../server/herdr/client.ts";
+import { runInPane, submitted } from "./pane-shell.ts";
 // the shortcut the app shows: shortcutHint() spells it per platform
 const VIEW_KEY = process.platform === "darwin" ? "⌘⇧J" : "Ctrl+Shift+J";
 
@@ -42,7 +43,7 @@ process.stdin.on("data", chunk => {
       };
       (window as any).dropTestSockets = () => { for (const socket of sockets) socket.close(); };
     }, pane);
-    await paneSendText(pane, `exec '${Bun.which("node")}' '${script}'\n`);
+    await paneSendText(pane, submitted(runInPane(Bun.which("node")!, script), "\n"));
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
     const errors: string[] = [];

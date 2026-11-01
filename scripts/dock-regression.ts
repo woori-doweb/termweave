@@ -8,6 +8,7 @@ import { chromium } from "playwright-core";
 import { createServer } from "../server/index.ts";
 import { sessionSnapshot, workspaceCreate, workspaceClose, herdrRpc } from "../server/herdr/client.ts";
 import { UsageService } from "../server/usage.ts";
+import { cwdSpelling } from "./pane-shell.ts";
 const root = mkdtempSync(join(tmpdir(), "herdr-dock-test-"));
 const owned: string[] = [];
 let server: ReturnType<typeof createServer> | undefined;
@@ -87,7 +88,8 @@ try {
   for (const id of ids) {
     const old = before.panes.find(pane => pane.pane_id === id)!;
     const next = after.panes.find(pane => pane.pane_id === id)!;
-    for (const key of ["pane_id", "terminal_id", "workspace_id", "tab_id", "cwd"] as const) assert.equal(next[key], old[key]);
+    for (const key of ["pane_id", "terminal_id", "workspace_id", "tab_id"] as const) assert.equal(next[key], old[key]);
+    assert.equal(cwdSpelling(next.cwd), cwdSpelling(old.cwd));
   }
   const popupPromise = page.waitForEvent("popup");
   await (await tools(page.locator(".dock-group").first())).getByRole("button", { name: "Open separate browser view", exact: true }).click();
@@ -111,7 +113,8 @@ try {
   const newActive = await page.locator(".dock-group").getAttribute("data-pane-id");
   assert.notEqual(newActive, freshSource);
   const shell = (await sessionSnapshot()).panes.find(pane => pane.pane_id === newActive)!;
-  for (const key of ["workspace_id", "tab_id", "cwd"] as const) assert.equal(shell[key], originalTerminal[key]);
+  for (const key of ["workspace_id", "tab_id"] as const) assert.equal(shell[key], originalTerminal[key]);
+  assert.equal(cwdSpelling(shell.cwd), cwdSpelling(originalTerminal.cwd));
   await page.locator(`[data-tab-id="${freshSource}"]`).click();
   await page.waitForFunction(id => document.querySelector(".dock-group")?.getAttribute("data-pane-id") === id, freshSource);
   assert.equal((await sessionSnapshot()).panes.find(pane => pane.pane_id === freshSource)?.terminal_id, originalTerminal.terminal_id);
