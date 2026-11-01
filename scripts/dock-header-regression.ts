@@ -37,7 +37,7 @@ try {
     }));
   }, { workspace, ids });
   await page.goto(`http://127.0.0.1:${server.port}/?pane=${ids[0]}`);
-  await page.locator(".conn-live").waitFor();
+  await page.locator(".conn-live:visible").waitFor();
   await page.locator('[data-group-id="header-a"]').waitFor();
   for (const theme of ["light", "dark"]) {
     await page.evaluate(theme => document.documentElement.setAttribute("data-theme", theme), theme);
@@ -61,7 +61,7 @@ try {
   }
   const touch = await browser.newPage({ viewport: { width: 768, height: 950 }, hasTouch: true });
   await touch.goto(page.url());
-  await touch.locator(".conn-live").waitFor();
+  await touch.locator(".conn-live:visible").waitFor();
   assert.ok(await touch.locator('.dock-tab-strip').evaluateAll(strips => strips.every(strip => {
     const bounds = strip.getBoundingClientRect();
     return Array.from(strip.querySelectorAll('button')).every(button => {
@@ -110,7 +110,7 @@ try {
     assert.ok(folderId);
     await assignment.selectOption(folderId);
     await page.reload();
-    await page.locator('.conn-live').waitFor();
+    await page.locator('.conn-live:visible').waitFor();
     assert.equal(await sidebar.locator('.team-folder .team-folder').count(), 1);
     assert.equal(await sidebar.locator('.team-folder .team-folder .team-pane').count(), 1);
   } else throw new Error('Sidebar must be visible for nested team folder check');

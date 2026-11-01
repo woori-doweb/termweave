@@ -31,7 +31,7 @@ export async function checkDefaultView(browser: Browser, origin: string): Promis
     page.on("pageerror", (error) => errors.push(error.message));
     const lens = () => page.locator(".view-switch button[aria-pressed='true']").getAttribute("title");
     await page.goto(`${origin}/?pane=${encodeURIComponent(one)}`);
-    await page.locator(".conn-live").waitFor();
+    await page.locator(".conn-live:visible").waitFor();
     assert.match((await lens()) ?? "", /^Live terminal/, "a desktop opens an agent pane's terminal by default");
 
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+Comma" : "Control+Shift+Comma");

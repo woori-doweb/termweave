@@ -28,7 +28,7 @@ try {
     const page = await context.newPage();let ready=false;page.on("websocket",socket=>socket.on("framereceived",({payload})=>{try{const m=JSON.parse(String(payload));if(m.type==="input-ready"&&m.pane_id===pane)ready=true;}catch{}}));const reads:string[]=[];page.on("request",request=>{if(request.url().includes("/api/file"))reads.push(request.url());});
     page.setDefaultTimeout(15_000);
     await page.goto(`http://127.0.0.1:${server.port}/?pane=${encodeURIComponent(pane)}`);
-    await page.locator(".conn-live").waitFor();
+    await page.locator(".conn-live:visible").waitFor();
     await page.waitForFunction(()=>document.querySelector(".xterm-screen")?.getBoundingClientRect().width!>200);
     const deadline=Date.now()+15000;while(!ready&&Date.now()<deadline)await Bun.sleep(20);assert.equal(ready,true);
     await paneSendText(pane,"stty cols 160; PS1=synthetic; PROMPT=synthetic\r");

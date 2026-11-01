@@ -55,7 +55,7 @@ export async function checkChatKeepsTerminalSize(browser: Browser, origin: strin
       }, settings);
       const page = await context.newPage();
       await page.goto(`${origin}/?pane=${encodeURIComponent(paneId)}`);
-      await page.locator(".conn-live").waitFor();
+      await page.locator(".conn-live:visible").waitFor();
       return page;
     };
     // the server answers an attach with input-ready, and resizes in the same step: once it is in,

@@ -48,7 +48,7 @@ try {
   page.on("websocket", ws => { socket = ws; ws.on("framesent", ({ payload }) => { const frame = JSON.parse(String(payload)); if (frame.type === "input") inputs.push(frame); }); });
   await page.addInitScript(() => localStorage.setItem("termweave:settings", JSON.stringify({ language: "en", terminalInputMode: "direct" })));
   const origin = `http://127.0.0.1:${server.port}`;
-  await page.goto(`${origin}/?pane=${ids[0]}`); await page.locator(".conn-live").waitFor();
+  await page.goto(`${origin}/?pane=${ids[0]}`); await page.locator(".conn-live:visible").waitFor();
   const key = `termweave:dock:workspace:v3:local:${encodeURIComponent(created.workspace.workspace_id)}`;
   const group = (id: string, tabs: string[]) => ({ kind: "group", id, tabs, active: tabs[0] });
   const initial = () => ({ kind: "split", id: "s", axis: "columns", ratio: .5, first: group("a", ids.slice(0, 3)), second: group("b", [ids[3]!]) });
@@ -106,7 +106,7 @@ try {
   const self = JSON.stringify(await stored()); await drag(ids[2]!, `[data-tab-id="${ids[2]}"]`, .8, .5); assert.equal(JSON.stringify(await stored()), self);
   passed.push("before-after-bidirectional-strip-append-self-noop");
   await reset(); await drag(ids[3]!, '[data-group-id="a"] .dock-strip-end', .6, .5); assert.deepEqual((await stored()).tabs, ids);
-  const persisted = JSON.stringify(await stored()); await page.reload(); await page.locator(".conn-live").waitFor(); assert.equal(JSON.stringify(await stored()), persisted);
+  const persisted = JSON.stringify(await stored()); await page.reload(); await page.locator(".conn-live:visible").waitFor(); assert.equal(JSON.stringify(await stored()), persisted);
   passed.push("cross-group-strip-append-order-active-persistence");
   await reset();
   for (const cancel of ["escape", "outside"] as const) {
@@ -124,7 +124,7 @@ try {
   await page.mouse.move(switchBox.x + switchBox.width / 2, switchBox.y + switchBox.height / 2, { steps: 20 });
   await page.mouse.move(switchBox.x + switchBox.width / 2, switchBox.y + switchBox.height / 2);
   assert.equal(await page.locator('.dock-drop-hint').count(), 1);
-  await page.goto(`${origin}/?pane=${other.root_pane.pane_id}`); await page.mouse.up(); await page.locator('.conn-live').waitFor();
+  await page.goto(`${origin}/?pane=${other.root_pane.pane_id}`); await page.mouse.up(); await page.locator('.conn-live:visible').waitFor();
   assert.equal(await page.locator('.dock-group').count(), 1);
   assert.equal(await page.locator('.dock-drop-hint, [data-insert], .dock-insert-end').count(), 0);
   await reset(); passed.push('workspace-switch-active-drag-cleanup');
@@ -147,7 +147,7 @@ try {
   const ratio = (await stored()).ratio; assert.ok(ratio > .5);
   await page.setViewportSize({ width: 1250, height: 950 });
   const bounds = await page.locator('.dock-group').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().bottom)); assert.ok(bounds.every(bottom => bottom <= 950));
-  const nested = JSON.stringify(await stored()); await page.reload(); await page.locator('.conn-live').waitFor(); assert.equal(JSON.stringify(await stored()), nested);
+  const nested = JSON.stringify(await stored()); await page.reload(); await page.locator('.conn-live:visible').waitFor(); assert.equal(JSON.stringify(await stored()), nested);
   passed.push("ratio-direction-active-order-resize-reload-bottom-bounds");
   await page.locator('[data-group-id="a"] .xterm-helper-textarea').focus();
   const count = inputs.length; await page.keyboard.press("Meta+ArrowRight"); await page.waitForTimeout(100);

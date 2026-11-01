@@ -38,7 +38,7 @@ try {
     localStorage.setItem(`termweave:dock:v1:local:${workspace}`,JSON.stringify(g('stale-v1')));
   },{a,existing,workspace:own.workspace.workspace_id});
   await page.goto(`${origin}/?pane=${a}`);
-  await page.locator('.conn-live').waitFor();
+  await page.locator('.conn-live:visible').waitFor();
   const rows = async() => { const snapshot=await sessionSnapshot(); assert.equal(await page.locator('.pane-select[data-workspace-id]').count(),snapshot.workspaces.length); };
   await rows();
   const originalRoster=(await sessionSnapshot()).panes.filter(p=>p.workspace_id===own.workspace.workspace_id);
@@ -151,7 +151,7 @@ try {
   await rows();
   assert.deepEqual(await page.evaluate(()=>Object.fromEntries(Object.keys(localStorage).filter(k=>k.includes('dock:session:v2:')||k.includes('dock:v1:')).map(k=>[k,localStorage.getItem(k)]))),legacy);
   const countBefore=(await sessionSnapshot()).panes.length;
-  const deep = await context.newPage(); await deep.goto(`${origin}/?pane=${existing}`); await deep.locator('.conn-live').waitFor();
+  const deep = await context.newPage(); await deep.goto(`${origin}/?pane=${existing}`); await deep.locator('.conn-live:visible').waitFor();
   await deep.waitForFunction(id=>Array.from(document.querySelectorAll('.dock-group')).some(g=>g.getAttribute('data-pane-id')===id),existing);
   assert.equal(await deep.locator(`.pane-select[data-workspace-id="${own.workspace.workspace_id}"]`).getAttribute('aria-current'),'true');
   assert.equal((await sessionSnapshot()).panes.length,countBefore); await deep.screenshot({path:join(evidence,'deep-link.png')}); await deep.close();

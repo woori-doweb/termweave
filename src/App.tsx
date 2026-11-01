@@ -780,7 +780,7 @@ export function App() {
         )}
         <div className="header-more-wrap" ref={moreRef}>
         <button type="button" className="icon-button header-more" aria-label={t("More tools")} aria-expanded={moreOpen} aria-controls="header-meta" onClick={() => setMoreOpen(open => !open)}>
-          <MoreHorizontal aria-hidden="true" /><span className={connected ? "header-more-dot" : "header-more-dot conn-reconnecting"} aria-hidden="true"><span className="conn-dot" /></span>
+          <MoreHorizontal aria-hidden="true" /><span className={`header-more-dot ${connected ? "conn-live" : "conn-reconnecting"}`} aria-hidden="true"><span className="conn-dot" /></span>
         </button>
         <div className="header-meta" id="header-meta" data-open={moreOpen || undefined}>
           <FrontendControls />

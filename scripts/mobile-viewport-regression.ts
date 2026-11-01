@@ -28,7 +28,7 @@ export async function checkMobileViewport(browser: Browser, origin: string, pane
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`${origin}/?pane=${encodeURIComponent(paneId)}`);
-    await page.locator(".conn-live").waitFor();
+    await page.locator(".conn-live:visible").waitFor();
     await page.getByTitle("Chat transcript (⌘⇧J)", { exact: true }).click();
     const composer = page.getByRole("textbox", { name: "Message", exact: true });
     await composer.waitFor();

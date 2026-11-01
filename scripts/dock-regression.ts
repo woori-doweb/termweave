@@ -32,7 +32,7 @@ try {
   const errors: string[] = [], input: { pane_id: string }[] = [];
   page.on("pageerror", error => { errors.push(error.message); console.error(error.stack); });
   page.on("websocket", socket => { socket.on("framereceived",({payload})=>{const m=JSON.parse(String(payload));if(m.type==="input-ready"&&m.pane_id)ready.add(m.pane_id);}); socket.on("framesent", ({ payload }) => { const m = JSON.parse(String(payload)); if (m.type === "input") input.push(m); }); });
-  await page.goto(`${origin}/?pane=${ids[0]}`); await page.locator(".conn-live").waitFor();
+  await page.goto(`${origin}/?pane=${ids[0]}`); await page.locator(".conn-live:visible").waitFor();
   const before = await sessionSnapshot();
   assert.equal(await page.getByRole("button", { name: /^(단일|좌우 2분할|상하 2분할|4분할)$/ }).count(), 0);
   assert.equal(await page.locator(".dock-group").count(), 4);
@@ -69,7 +69,7 @@ try {
   await page.locator(".dock-group").first().getByRole("button", { name: "Zoom", exact: true }).click();
   assert.equal(await page.locator(".dock-group").count(), 1);
   await page.getByRole("button", { name: "Restore layout", exact: true }).click(); assert.equal(await page.locator(".dock-group").count(), 4);
-  ready.clear(); await page.reload(); await page.locator(".conn-live").waitFor(); assert.equal(await page.locator(".dock-group").count(), 4);
+  ready.clear(); await page.reload(); await page.locator(".conn-live:visible").waitFor(); assert.equal(await page.locator(".dock-group").count(), 4);
   assert.equal(await page.evaluate(() => localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith("termweave:dock:v1:"))!)), stored);
   const active = await page.locator(".dock-group").first().getAttribute("data-pane-id");
   const deadline=Date.now()+15000;while(!ready.has(active!)&&Date.now()<deadline)await Bun.sleep(20);assert.ok(ready.has(active!),"active owned pane never input-ready");
@@ -83,16 +83,16 @@ try {
   }
   const popupPromise = page.waitForEvent("popup");
   await page.locator(".dock-group").first().getByRole("button", { name: "Open separate browser view", exact: true }).click();
-  const popup = await popupPromise; await popup.locator(".conn-live").waitFor();
+  const popup = await popupPromise; await popup.locator(".conn-live:visible").waitFor();
   await popup.waitForFunction(id => document.querySelector(".dock-group")?.getAttribute("data-pane-id") === id, active);
   assert.equal((await sessionSnapshot()).panes.length, after.panes.length);
   await popup.close();
   await page.locator(".dock-group").first().getByRole("button", { name: "Hide from view", exact: true }).click();
   assert.equal((await sessionSnapshot()).panes.length, after.panes.length);
-  await page.goto(`${origin}/?pane=${other.root_pane.pane_id}`); await page.locator(".conn-live").waitFor(); assert.equal(await page.locator(".dock-group").count(), 1);
+  await page.goto(`${origin}/?pane=${other.root_pane.pane_id}`); await page.locator(".conn-live:visible").waitFor(); assert.equal(await page.locator(".dock-group").count(), 1);
   const freshSource = other.root_pane.pane_id;
   const originalTerminal = (await sessionSnapshot()).panes.find(pane => pane.pane_id === freshSource)!;
-  await page.goto(`${origin}/?pane=${freshSource}`); await page.locator(".conn-live").waitFor();
+  await page.goto(`${origin}/?pane=${freshSource}`); await page.locator(".conn-live:visible").waitFor();
   assert.equal(await page.locator(".dock-group").count(), 1);
   assert.equal(await page.locator(".dock-group").getByRole("tab").count(), 1);
   await page.getByRole("button", { name: "New terminal tab", exact: true }).click();

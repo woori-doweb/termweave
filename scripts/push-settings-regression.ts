@@ -45,7 +45,7 @@ export async function checkPushSettings(browser: Browser, origin: string): Promi
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(origin);
-    await page.locator(".conn-live").waitFor();
+    await page.locator(".conn-live:visible").waitFor();
     await page.waitForFunction(() => document.querySelector(".bell-button")?.getAttribute("aria-label") === "Alerts on");
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+Comma" : "Control+Shift+Comma");
     const send = page.getByRole("button", { name: "Send test", exact: true });
