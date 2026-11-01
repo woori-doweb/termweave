@@ -27,7 +27,10 @@ try {
   const created = await workspaceCreate({ cwd: root, label: "termweave-test-send-composing" });
   workspace = created.workspace.workspace_id;
   const pane = created.root_pane.pane_id;
-  await paneSendText(pane, `exec ${quote(Bun.which("node")!)} ${quote(script)}\r`);
+  // a Windows pane runs PowerShell: its call operator starts node, single quotes double inside
+  const psQuote = (value: string) => "'" + value.replaceAll("'", "''") + "'";
+  const node = Bun.which("node")!;
+  await paneSendText(pane, process.platform === "win32" ? `& ${psQuote(node)} ${psQuote(script)}\r` : `exec ${quote(node)} ${quote(script)}\r`);
   await until(() => existsSync(ready), "capture process was not ready");
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "en-US" });
   await context.addInitScript((pane) => {

@@ -25,6 +25,8 @@ import { checkDroplet } from "./droplet-regression.ts";
 import { checkChatKeepsTerminalSize } from "./chat-size-regression.ts";
 import { checkCommandBackspace } from "./terminal-command-backspace-regression.ts";
 import { UsageService } from "../server/usage.ts";
+// the shortcut the app shows: shortcutHint() spells it per platform
+const VIEW_KEY = process.platform === "darwin" ? "⌘⇧J" : "Ctrl+Shift+J";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "herdr-web-ui-browser-")));
 const workspaces: string[] = [];
@@ -147,7 +149,7 @@ try {
   // Use a real browser paste: keydown must not send Ctrl+V (0x16) to the agent,
   // where it can trigger image paste against the server's unrelated clipboard.
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin });
-  await page.getByTitle("Live terminal (⌘⇧J)", { exact: true }).click();
+  await page.getByTitle(`Live terminal (${VIEW_KEY})`, { exact: true }).click();
   await checkTerminalFileInput(page, sockets[0]!);
   const terminalInput = page.locator(".xterm-helper-textarea");
   for (const [shortcut, text] of [
@@ -238,10 +240,10 @@ try {
     await page.waitForTimeout(NO_SEND_WAIT_MS);
     assert.deepEqual(inputs.slice(beforeSwitch), [], `${key} must not reach a pane`);
     await page.goto(`${origin}/?pane=${encodeURIComponent(paneA)}`);
-    await page.getByTitle("Live terminal (⌘⇧J)", { exact: true }).click();
+    await page.getByTitle(`Live terminal (${VIEW_KEY})`, { exact: true }).click();
     await page.locator(".xterm-helper-textarea").waitFor();
   }
-  await page.getByTitle("Chat transcript (⌘⇧J)", { exact: true }).click();
+  await page.getByTitle(`Chat transcript (${VIEW_KEY})`, { exact: true }).click();
   await composer.waitFor();
   console.log("PASS terminal clipboard paste sends text once and preserves Ctrl+C");
 
@@ -435,7 +437,7 @@ try {
   await page.locator('.pane-select[data-workspace-id]').first().waitFor();
   const workspaceRows = await page.locator('.pane-select[data-workspace-id]').count();
   assert.equal(workspaceRows, (await sessionSnapshot()).workspaces.length);
-  await page.getByTitle("Live terminal (⌘⇧J)", { exact: true }).click();
+  await page.getByTitle(`Live terminal (${VIEW_KEY})`, { exact: true }).click();
   await page.getByLabel('Existing terminals', { exact: true }).selectOption(paneB);
   await page.waitForFunction(id => document.querySelector('.dock-group')?.getAttribute('data-pane-id') === id, paneB);
   await page.reload(); await page.locator('.conn-live').waitFor();
@@ -634,7 +636,7 @@ try {
   await mobilePage.locator(".conn-live").waitFor();
   const tapHighlight = await mobilePage.locator(".view-switch button").first().evaluate((node) => getComputedStyle(node).webkitTapHighlightColor);
   assert.equal(tapHighlight, "rgba(0, 0, 0, 0)", "native tap overlays do not obscure selection");
-  await mobilePage.getByTitle("Chat transcript (⌘⇧J)", { exact: true }).click();
+  await mobilePage.getByTitle(`Chat transcript (${VIEW_KEY})`, { exact: true }).click();
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).fill("mobile draft");
   await mobilePage.locator(".chat-terminal-fallback").waitFor();
   assert.equal(await mobilePage.locator(".chat-terminal-fallback").getAttribute("open"), null, "missing native history is labeled, not presented as broken chat");
@@ -657,10 +659,10 @@ try {
   await mobilePage.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await mobilePage.waitForTimeout(NO_SEND_WAIT_MS);
   assert.equal(await typing(mobilePage), false, "a pane picked on a phone does not take the keyboard");
-  await mobilePage.getByTitle("Live terminal (⌘⇧J)", { exact: true }).click();
+  await mobilePage.getByTitle(`Live terminal (${VIEW_KEY})`, { exact: true }).click();
   await mobilePage.waitForTimeout(NO_SEND_WAIT_MS);
   assert.equal(await typing(mobilePage), false, "nor does switching its lens");
-  await mobilePage.getByTitle("Chat transcript (⌘⇧J)", { exact: true }).click();
+  await mobilePage.getByTitle(`Chat transcript (${VIEW_KEY})`, { exact: true }).click();
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).tap();
   await until(() => typing(mobilePage), "a tap on the message box takes the keyboard");
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).blur();
@@ -685,7 +687,7 @@ try {
   await chipPage.route(promptRoute, (route) => route.fulfill(suggest));
   await chipPage.goto(`${origin}/?pane=${encodeURIComponent(paneB)}`);
   await chipPage.locator(".conn-live").waitFor();
-  await chipPage.getByTitle("Chat transcript (⌘⇧J)", { exact: true }).click();
+  await chipPage.getByTitle(`Chat transcript (${VIEW_KEY})`, { exact: true }).click();
   await chipPage.getByTitle("Use the suggestion", { exact: true }).click();
   assert.equal(await chipPage.getByRole("textbox", { name: "Message", exact: true }).inputValue(), "run the tests", "the chip puts the suggestion in the box");
   await chipPhone.close();
@@ -705,7 +707,7 @@ try {
   }));
   await touchPage.goto(`${origin}/?pane=${encodeURIComponent(paneB)}`);
   await touchPage.locator(".conn-live").waitFor();
-  await touchPage.getByTitle("Live terminal (⌘⇧J)", { exact: true }).click();
+  await touchPage.getByTitle(`Live terminal (${VIEW_KEY})`, { exact: true }).click();
   const line = touchPage.getByRole("textbox", { name: "Terminal input line", exact: true });
   await line.waitFor();
   assert.equal(await touchPage.locator(".xterm-helper-textarea").getAttribute("inputmode"), "none");

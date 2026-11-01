@@ -49,6 +49,8 @@ const lanes: [string, string[], Record<string, string>?][] = [
   ['pane-move', ['bun', 'scripts/pane-move-regression.ts']],
   ['dock', ['bun', '--preload', './scripts/staging-static.ts', 'scripts/dock-regression.ts']],
   ['title-drag', ['bun', '--preload', './scripts/staging-static.ts', 'scripts/dock-title-drag-regression.ts']],
+  ['dock-header', ['bun', '--preload', './scripts/staging-static.ts', 'scripts/dock-header-regression.ts']],
+  ['send-composing', ['bun', '--preload', './scripts/staging-static.ts', 'scripts/terminal-send-composing-regression.ts']],
   ['workspace', ['bun', '--preload', './scripts/staging-static.ts', 'scripts/session-isolation-regression.ts']],
   ['move', ['bun', '--preload', './scripts/staging-static.ts', 'scripts/pane-move-browser.ts']],
   ['preview', ['bun', '--preload', './scripts/staging-static.ts', 'scripts/preview-app-regression.ts']],

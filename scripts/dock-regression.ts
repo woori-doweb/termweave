@@ -47,6 +47,8 @@ try {
   await page.waitForTimeout(300);
   await drag(1, 0); await page.waitForFunction(() => document.querySelectorAll(".dock-group").length === 3);
   const first = page.locator(".dock-group").first(); assert.equal(await first.getByRole("tab").count(), 2);
+  // the keyboard layout lives in the group's tools panel, closed by default
+  await first.getByRole("button", { name: "Terminal tools", exact: true }).click();
   await first.getByText("Keyboard layout", { exact: true }).click();
   await first.getByRole("button", { name: "Move tab earlier", exact: true }).click();
   assert.equal(await first.getByRole("tab").first().getAttribute("data-tab-id"), ids[1]!);
