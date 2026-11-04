@@ -3,7 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FONT_FAMILY_MAX_CHARS } from "./fontFamily.ts";
-import { alertPrefs, CHAT_FONT_MAX, CHAT_FONT_MIN, chatFontSize, DEFAULT_SETTINGS, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, quickReplyButtons, sanitizeSettings, terminalTheme, forgetPaneViews } from "./settings.ts";
+import { alertPrefs, CHAT_FONT_MAX, CHAT_FONT_MIN, chatFontSize, DEFAULT_SETTINGS, QUICK_REPLIES_MAX, QUICK_REPLY_MAX_CHARS, quickReplyButtons, sanitizeSettings, storedShortcutOverrides, terminalTheme, forgetPaneViews } from "./settings.ts";
 
 it("keeps the screen wake lock off until this device explicitly enables it", () => {
   expect(DEFAULT_SETTINGS.keepScreenOn).toBe(false);
@@ -319,5 +319,44 @@ describe("default lens", () => {
     const storage = { get length() { return data.size; }, key: (i: number) => [...data.keys()][i] ?? null, removeItem: (k: string) => { data.delete(k); } };
     expect(forgetPaneViews(storage)).toBe(2);
     expect([...data.keys()]).toEqual(["termweave:settings"]);
+  });
+});
+
+describe("shortcut overrides another tab saved", () => {
+  // the record another tab wrote, read through a stand-in localStorage that counts writes
+  function tab(record: string | null) {
+    let writes = 0;
+    const local = {
+      getItem: (key: string) => key === "termweave:settings" ? record : null,
+      setItem: () => { writes++; },
+    } as unknown as Storage;
+    const previous = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { localStorage: local } });
+    const restore = () => { if (previous) Object.defineProperty(globalThis, "window", previous); else Reflect.deleteProperty(globalThis, "window"); };
+    return { local, writes: () => writes, restore };
+  }
+
+  it("takes the overrides another tab saved, without writing them back", () => {
+    const t = tab(JSON.stringify({ shortcutOverrides: { palette: "k" }, terminalFontSize: 22 }));
+    try {
+      expect(storedShortcutOverrides({ key: "termweave:settings", storageArea: t.local }, t.local)).toEqual({ palette: "k" });
+      expect(t.writes()).toBe(0);
+    } finally { t.restore(); }
+  });
+
+  it("returns to the defaults when another tab removes the record or clears storage", () => {
+    const t = tab(null);
+    try {
+      expect(storedShortcutOverrides({ key: "termweave:settings", storageArea: t.local }, t.local)).toEqual({});
+      expect(storedShortcutOverrides({ key: null, storageArea: t.local }, t.local)).toEqual({});
+    } finally { t.restore(); }
+  });
+
+  it("ignores another record and another storage", () => {
+    const t = tab(JSON.stringify({ shortcutOverrides: { palette: "k" } }));
+    try {
+      expect(storedShortcutOverrides({ key: "termweave:selection", storageArea: t.local }, t.local)).toBeNull();
+      expect(storedShortcutOverrides({ key: "termweave:settings", storageArea: {} as Storage }, t.local)).toBeNull();
+    } finally { t.restore(); }
   });
 });

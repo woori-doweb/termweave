@@ -237,6 +237,16 @@ export function loadSettings(): Settings {
   }
 }
 
+/**
+ * Another tab saved or cleared the settings: the shortcut overrides it now holds, or null when the
+ * event is about another record or another storage. Only the overrides follow, so a tab keeps its
+ * own unsaved view of the rest, and nothing is written back (no echo between tabs).
+ */
+export function storedShortcutOverrides(event: Pick<StorageEvent, "key" | "storageArea">, local: Storage): ShortcutOverrides | null {
+  if (event.storageArea !== local || (event.key !== STORAGE_KEY && event.key !== null)) return null;
+  return loadSettings().shortcutOverrides;
+}
+
 function saveSettings(settings: Settings): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -324,6 +334,15 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [systemDark, setSystemDark] = useState(() => resolveTheme("system") === "dark");
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      const shortcutOverrides = storedShortcutOverrides(event, window.localStorage);
+      if (shortcutOverrides) setSettings((current) => ({ ...current, shortcutOverrides }));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   useEffect(() => {
     const query = window.matchMedia?.(DARK_QUERY);
