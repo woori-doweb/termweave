@@ -7,9 +7,20 @@ import type { DirectoryListing } from "../shared/protocol.ts";
 /** A folder with more subfolders than this lists the first ones and says it stopped. */
 export const MAX_DIRECTORY_ENTRIES = 500;
 
+/** A Windows PC's drives (`C:\` …), the roots its folders hang from; a drive with no disc in it is left out. */
+export function driveRoots(): string[] {
+  const roots: string[] = [];
+  for (let code = 65; code <= 90; code++) {
+    const root = `${String.fromCharCode(code)}:\\`;
+    try { if (statSync(root).isDirectory()) roots.push(root); } catch { /* no such drive */ }
+  }
+  return roots;
+}
+
 /**
  * The folders inside one directory, for the new-session dialog's folder browser. One
- * directory at a time, names only, nothing kept between calls: the cost is one readdir.
+ * directory at a time, names only, nothing kept between calls: the cost is one readdir
+ * (and, on Windows, a stat per drive letter).
  * `path` takes an absolute path, `~` or `~/…` (the dialog's own syntax); empty means home.
  * Hidden folders (a leading dot) are left out unless asked for. Null when `path` is not
  * a directory this user can read.
@@ -54,5 +65,7 @@ export function listDirectories(path: string, hidden = false, withFiles = false,
     directories: directories.slice(0, MAX_DIRECTORY_ENTRIES),
     truncated: directories.length > MAX_DIRECTORY_ENTRIES || files.length > MAX_DIRECTORY_ENTRIES,
     ...(withFiles ? { files: files.slice(0, MAX_DIRECTORY_ENTRIES) } : {}),
+    // a drive's root has no parent, yet the other drives are beside it
+    ...(process.platform === "win32" ? { roots: driveRoots() } : {}),
   };
 }

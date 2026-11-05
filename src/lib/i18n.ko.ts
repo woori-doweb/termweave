@@ -343,6 +343,7 @@ export const KO: Record<string, string> = {
   "Choose a folder": "폴더 선택",
   "Parent folder": "상위 폴더",
   "Home folder": "홈 폴더",
+  "This PC": "내 PC",
   "Nothing here": "여기에는 아무것도 없습니다",
   "No folders here": "여기에는 폴더가 없습니다",
   "Showing the first {n} folders; type the rest of the path to go further.": "처음 {n}개 폴더만 보입니다. 더 들어가려면 나머지 경로를 입력하세요.",

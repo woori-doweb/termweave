@@ -31,8 +31,10 @@
   font-size: var(--fs-xs);
 }
 
+/* a fixed height: a listing of another length must not move the dialog (which is centred) under
+   the pointer, or a double-click's second click lands on Parent folder or another folder */
 .dir-browser-list {
-  max-height: calc(var(--control-h) * 7);
+  height: calc(var(--control-h) * 7);
   margin: 0;
   padding: var(--space-1) 0;
   overflow-y: auto;
@@ -132,5 +134,5 @@
 }
 
 .files-dialog .dir-browser-list {
-  max-height: min(60vh, calc(var(--control-h) * 14));
+  height: min(60vh, calc(var(--control-h) * 14));
 }

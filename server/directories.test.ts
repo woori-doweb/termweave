@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 
 import { listDirectories, MAX_DIRECTORY_ENTRIES } from "./directories.ts";
 
@@ -39,5 +39,20 @@ describe("listDirectories", () => {
     const listing = listDirectories(root)!;
     expect(listing.directories).toHaveLength(MAX_DIRECTORY_ENTRIES);
     expect(listing.truncated).toBe(true);
+  });
+
+  // a drive's root has no parent: the listing names the other drives instead
+  it.skipIf(process.platform !== "win32")("names this PC's drives on Windows, each one listable", () => {
+    const listing = listDirectories(temp())!;
+    const own = parse(tmpdir()).root.toUpperCase();
+    expect(listing.roots).toContain(own);
+    for (const root of listing.roots!) {
+      expect(root).toMatch(/^[A-Z]:\\$/);
+      expect(listDirectories(root)?.parent).toBeNull();
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("names no drives where one root holds everything", () => {
+    expect(listDirectories(temp())!.roots).toBeUndefined();
   });
 });
