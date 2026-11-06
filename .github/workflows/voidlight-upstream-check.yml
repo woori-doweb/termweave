@@ -1,0 +1,46 @@
+name: VoidLight00 upstream check
+# The fork is the product. This only reports new VoidLight00/termweave commits that main has not
+# migrated yet (run summary + warning); the migration into the Windows build is done by hand in
+# this fork: branch from main, merge upstream main, keep the Windows behaviour, PR into main.
+on:
+  schedule:
+    - cron: '23 0 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: voidlight-upstream-check
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Compare upstream main with this fork's main
+        run: |
+          git fetch --no-tags https://github.com/VoidLight00/termweave.git main
+          upstream=$(git rev-parse FETCH_HEAD)
+          if git merge-base --is-ancestor "$upstream" origin/main; then
+            echo "main already contains VoidLight00 \`${upstream:0:7}\`." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          count=$(git rev-list --count origin/main..FETCH_HEAD)
+          echo "::warning title=VoidLight00 update pending::$count upstream commit(s) up to ${upstream:0:7} are not migrated into main"
+          {
+            echo "## VoidLight00 update pending"
+            echo
+            echo "VoidLight00/termweave main is at \`$upstream\`: $count commit(s) not yet migrated into this fork's main."
+            echo
+            git log --format='- %h %ad %s' --date=short origin/main..FETCH_HEAD
+            echo
+            if git merge-tree --write-tree --name-only origin/main FETCH_HEAD > merge-tree.txt; then
+              echo "A merge into main has no conflicts."
+            else
+              echo "A merge into main conflicts in:"
+              sed -n '2,/^$/p' merge-tree.txt | sed '/^$/d; s/^/- /'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
