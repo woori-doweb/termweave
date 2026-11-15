@@ -34,6 +34,7 @@ const lanes: [string, string[], Record<string, string>?][] = [
   ['tmux', ['bash', 'gates/tmux_runtime_gate.sh']],
   ['workspace-status', ['bun', 'scripts/workspace-status-regression.ts']],
   ['workspace-reorder', ['bun', 'scripts/workspace-reorder-regression.ts']],
+  ['ctrl-c', ['bun', 'scripts/ctrl-c-regression.ts']],
   ['release-native', ['bun', 'scripts/release/native-regression.ts']],
   ['release-browser', ['bun', 'scripts/release/browser-regression.ts']],
   ['install-cleanup', ['bun', 'scripts/install-cleanup-regression.ts']],
