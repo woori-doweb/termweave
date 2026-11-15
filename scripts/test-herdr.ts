@@ -37,6 +37,24 @@ function herdrBinary(): string | null {
   return found ?? null;
 }
 
+/**
+ * The test herdr and its panes must take Ctrl+C as a herdr the person starts does. Windows hands
+ * a console process's "ignore Ctrl+C" flag (ConsoleFlags bit 0) on to every child; a harness run
+ * from an agent or CI shell often carries it, and Bun.spawn passes it on, so `\x03` typed into a
+ * pane would never stop the program running there. Clear it before the server is spawned.
+ */
+async function takeCtrlC(): Promise<void> {
+  if (process.platform !== "win32") return;
+  const { dlopen, FFIType } = await import("bun:ffi");
+  const kernel32 = dlopen("kernel32.dll", { SetConsoleCtrlHandler: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 } });
+  try {
+    // a test herdr that ignores Ctrl+C would make every Ctrl+C check lie: fail closed
+    if (kernel32.symbols.SetConsoleCtrlHandler(null, 0) === 0) throw new Error("SetConsoleCtrlHandler(NULL, FALSE) failed: the test herdr would ignore Ctrl+C");
+  } finally {
+    kernel32.close();
+  }
+}
+
 async function answers(socket: string): Promise<boolean> {
   try { await ping(socket); return true; } catch { return false; }
 }
@@ -52,6 +70,7 @@ export async function useTestHerdr(): Promise<string | null> {
   if (!(await answers(socket))) {
     mkdirSync(dirname(socket), { recursive: true });
     assertIsolatedSocket(socket);
+    await takeCtrlC();
     const ownedServer = Bun.spawn([herdr, "--session", TEST_SESSION, "server"], {
       stdin: "ignore",
       stdout: Bun.file(join(dirname(socket), "test-server.log")),
