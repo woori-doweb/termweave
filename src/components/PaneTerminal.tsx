@@ -44,6 +44,7 @@ import { OpenFileContext } from "../lib/filePaths.ts";
 import { fileUriPath, terminalFileLinkProvider } from "../lib/terminalFileLinks.ts";
 import { adjustTerminalGlyphs } from "../lib/terminalGlyphs.ts";
 import { DELTA_PIXEL, historyOffset, wheelStep } from "../lib/mirrorScroll.ts";
+import { createVelocityTracker, flingStep, startFling } from "../lib/touchFling.ts";
 
 /** How long a resize must rest before the grid refits and the pty follows it. */
 const RESIZE_SETTLE_MS = 120;
@@ -1210,15 +1211,40 @@ export function PaneTerminal({
     // An adopted grid sends herdr no wheel (an observer's reports are dropped, a mirror reports
     // nothing): there the drag pans the mount, both ways, to the cells past its edge, and on a
     // mirror a drag the mount cannot follow further up or down scrolls the pane's history.
+    // A flick that lifts at speed keeps scrolling the same way with decaying speed, as a phone's
+    // own scrolling does, until it slows to a stop, a new touch lands or the pane switches;
+    // with reduced motion asked for, the text stops where the finger left it.
     let touchX = 0;
     let touchY = 0;
     let tracking = false;
+    const touchVelocity = createVelocityTracker();
+    let flingFrame: number | null = null;
+    const stopFling = (): void => {
+      if (flingFrame !== null) window.cancelAnimationFrame(flingFrame);
+      flingFrame = null;
+    };
+    // delta and across are the finger's travel since the last move, up and left positive
+    const moveBy = (across: number, delta: number, x: number, y: number): void => {
+      if (adopted()) {
+        panned = true;
+        const pastEdge = delta !== 0 && mirrorHistory() && !canPan(delta);
+        host.scrollBy(across, delta);
+        if (pastEdge) scrollHistory(delta, DELTA_PIXEL, 1);
+        return;
+      }
+      if (delta !== 0) {
+        const target = term.element ?? host;
+        target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: delta, clientX: x, clientY: y }));
+      }
+    };
     const onTouchStart = (event: TouchEvent): void => {
+      stopFling();
       tracking = event.touches.length === 1;
       const first = event.touches[0];
       if (tracking && first) {
         touchX = first.clientX;
         touchY = first.clientY;
+        touchVelocity.reset(event.timeStamp, first.clientX, first.clientY);
       }
     };
     const onTouchMove = (event: TouchEvent): void => {
@@ -1231,24 +1257,40 @@ export function PaneTerminal({
       const across = touchX - first.clientX;
       touchX = first.clientX;
       touchY = first.clientY;
-      if (adopted()) {
-        panned = true;
-        const pastEdge = delta !== 0 && mirrorHistory() && !canPan(delta);
-        host.scrollBy(across, delta);
-        if (pastEdge) scrollHistory(delta, DELTA_PIXEL, 1);
-        return;
-      }
-      if (delta !== 0) {
-        const target = term.element ?? host;
-        target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: delta, clientX: first.clientX, clientY: first.clientY }));
-      }
+      touchVelocity.add(event.timeStamp, first.clientX, first.clientY);
+      moveBy(across, delta, first.clientX, first.clientY);
     };
-    const onTouchEnd = (): void => {
+    const onTouchEnd = (event: TouchEvent): void => {
+      if (!tracking) return;
       tracking = false;
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      let velocity = startFling(touchVelocity.velocity(event.timeStamp));
+      if (!velocity) return;
+      // the finger's velocity is down and right positive, a move's delta up and left: the fling
+      // continues the drag with the negated travel, at the point the finger lifted
+      const pane = paneRef.current;
+      const x = touchX;
+      const y = touchY;
+      let last = performance.now();
+      const frame = (now: number): void => {
+        flingFrame = null;
+        if (disposed || !velocity || paneRef.current !== pane) return;
+        const step = flingStep(velocity, Math.max(0, now - last));
+        last = Math.max(last, now);
+        velocity = step.v;
+        moveBy(-step.dx, -step.dy, x, y);
+        if (!step.done) flingFrame = window.requestAnimationFrame(frame);
+      };
+      flingFrame = window.requestAnimationFrame(frame);
+    };
+    const onTouchCancel = (): void => {
+      tracking = false;
+      stopFling();
     };
     host.addEventListener("touchstart", onTouchStart, { passive: true });
     host.addEventListener("touchmove", onTouchMove, { passive: false });
     host.addEventListener("touchend", onTouchEnd, { passive: true });
+    host.addEventListener("touchcancel", onTouchCancel, { passive: true });
 
     // The pty is shared per pane: a client on another device (typically a phone)
     // resizes it to its own geometry, and this tab's viewport never changed, so
@@ -1279,6 +1321,8 @@ export function PaneTerminal({
       host.removeEventListener("touchstart", onTouchStart);
       host.removeEventListener("touchmove", onTouchMove);
       host.removeEventListener("touchend", onTouchEnd);
+      host.removeEventListener("touchcancel", onTouchCancel);
+      stopFling();
       host.removeEventListener("mousedown", onMouseDown, { capture: true });
       window.removeEventListener("mousemove", onMouseMove, { capture: true });
       window.removeEventListener("blur", onBlur);
