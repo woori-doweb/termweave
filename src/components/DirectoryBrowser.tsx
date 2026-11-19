@@ -96,7 +96,7 @@ export function DirectoryBrowser({ start, onPick, onOpenFile, onBusyChange }: Di
     if (listing.parent !== null) void open(listing.parent, hidden, false);
     else if (roots.length > 1) { setCreating(false); setDrives(true); }
   };
-  const shown = drives ? t("This PC") : listing ? homeRelative(listing.path, listing.home) : start || "~";
+  const shown = drives ? t("Drives") : listing ? homeRelative(listing.path, listing.home) : start || "~";
 
   const createFolder = async () => {
     if (!listing || saving || !folderName.trim()) return;

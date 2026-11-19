@@ -352,7 +352,7 @@ export const ZH: Record<string, string> = {
   "Choose a folder": "选择文件夹",
   "Parent folder": "上级文件夹",
   "Home folder": "主文件夹",
-  "This PC": "此电脑",
+  "Drives": "此电脑",
   "Nothing here": "此处为空",
   "No folders here": "此处没有文件夹",
   "Showing the first {n} folders; type the rest of the path to go further.": "仅显示前 {n} 个文件夹。输入其余路径以继续深入。",

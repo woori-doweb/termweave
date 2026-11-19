@@ -73,7 +73,7 @@ try {
     await up.click();
     assert.equal(await page.locator("#project-folder-name").count(), 0, "the drives close the new folder form");
     assert.equal(await newFolder.isDisabled(), true, "no folder is created among the drives");
-    assert.equal(await shownPath(page), "This PC");
+    assert.equal(await shownPath(page), "Drives");
     const drives = await page.locator(".dir-browser-item").allInnerTexts();
     assert.ok(drives.includes(drive.toUpperCase()), `${drive} is among ${drives.join(" ")}`);
     assert.equal(await page.getByRole("button", { name: "Use this folder" }).isDisabled(), true, "the drives are no folder to pick");

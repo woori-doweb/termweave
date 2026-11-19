@@ -350,7 +350,7 @@ export const JA: Record<string, string> = {
   "Choose a folder": "フォルダーを選択",
   "Parent folder": "親フォルダー",
   "Home folder": "ホームフォルダー",
-  "This PC": "PC",
+  "Drives": "PC",
   "Nothing here": "何もありません",
   "No folders here": "フォルダーはありません",
   "Showing the first {n} folders; type the rest of the path to go further.": "最初の {n} 個のフォルダーのみ表示しています。さらに進むには残りのパスを入力してください。",
