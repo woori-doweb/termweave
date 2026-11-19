@@ -281,3 +281,12 @@
 .terminal-stack.is-chat .pane-terminal {
   content-visibility: hidden;
 }
+
+/* Bionic reading (src/lib/bionic.ts) dims each word's end. xterm 5.5's DOM renderer dims only
+   through the .xterm-dim class colour, and a cell with its own colour (Claude Code paints in
+   RGB; light theme lifts contrast inline) overrides it, so the end would stay bright. Fade
+   those cells instead; cells with a background are left alone so row bars keep their fill.
+   Dark theme only: the light theme lifts contrast and already draws dim cells at half. */
+:root[data-theme="dark"][data-bionic="on"] .xterm .xterm-dim:is([style*="color"], [class*="xterm-fg-"]):not([style*="background"], [class*="xterm-bg-"]) {
+  opacity: 0.5 !important; /* xterm.css resets .xterm-dim to 1 !important */
+}

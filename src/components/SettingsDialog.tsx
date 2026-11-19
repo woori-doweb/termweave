@@ -36,6 +36,8 @@ export interface SettingsDialogProps {
   /** how this browser got in, from the last health check */
   auth: HealthAuth | null;
   onEnableNotifications: () => Promise<boolean>;
+  /** the section to open at (its nav id, such as "remote"); the first one when absent */
+  section?: string;
 }
 
 function Toggle({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
@@ -186,7 +188,7 @@ function applySettingsSearch(root: HTMLElement, query: string): number {
 
 interface NavItem { id: string; label: string; icon: LucideIcon }
 
-export function SettingsDialog({ open, onClose, actions, updates, auth, onEnableNotifications }: SettingsDialogProps) {
+export function SettingsDialog({ open, onClose, actions, updates, auth, onEnableNotifications, section }: SettingsDialogProps) {
   const { settings, update } = useSettings();
   // the accounts to order and hide: the same report the meters show, from the server's cache
   const usage = useUsage(open && settings.showUsage);
@@ -286,7 +288,12 @@ export function SettingsDialog({ open, onClose, actions, updates, auth, onEnable
   useEffect(() => {
     if (!open) return;
     setQuery("");
-    setActiveSection("appearance");
+    setActiveSection(section ?? "appearance");
+    // opened at a section (Fleet's connection settings): go there, and again once the sections
+    // above it have loaded what they read on open (devices, usage), which pushes it down
+    const toSection = () => bodyRef.current?.querySelector(`[data-nav="${section}"]`)?.scrollIntoView({ block: "start" });
+    const settled = section ? window.setTimeout(toSection, 400) : undefined;
+    if (section) window.requestAnimationFrame(toSection);
     // a touch screen would raise its keyboard for the search field: the first section takes focus there
     if (window.matchMedia?.("(pointer: fine)").matches) searchRef.current?.focus();
     else firstControlRef.current?.focus();
@@ -296,8 +303,8 @@ export function SettingsDialog({ open, onClose, actions, updates, auth, onEnable
       onClose();
     };
     window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [open, onClose]);
+    return () => { window.removeEventListener("keydown", closeOnEscape); window.clearTimeout(settled); };
+  }, [open, onClose, section]);
 
   // the search hides rows in place, so the controls and their state stay as they are; every render re-applies it
   useLayoutEffect(() => {
@@ -436,12 +443,20 @@ export function SettingsDialog({ open, onClose, actions, updates, auth, onEnable
                     ))}
                   </div>
                 </div>
+                <div className="settings-row">
+                  <div><span className="settings-label">{t("Highlight the current workspace")}</span><span className="settings-description">{t("Ring the open workspace in the sidebar, mark it Current, and show its name as a pill above the terminal")}</span></div>
+                  <Toggle label={t("Highlight the current workspace")} checked={settings.focusHighlight} onChange={(focusHighlight) => update({ focusHighlight })} />
+                </div>
                 <div className="settings-row settings-row-action">
                   <button type="button" className="btn" onClick={() => { if (window.confirm(t("Copy upstream preferences without credentials? Existing TermWeave values stay unchanged."))) { migrateUpstreamPreferences(localStorage, true); window.location.reload(); } }}>{t("Import upstream preferences (opt-in)")}</button>
                 </div>
               </div>
               <h4 className="settings-subheading">{t("Terminal")}</h4>
               <div className="settings-card">
+                <div className="settings-row">
+                  <div><span className="settings-label">{t("Bionic reading")}</span><span className="settings-description">{t("In live terminal output, draw the start of each word bold and the rest dim, Korean included. Only the display changes; copied text stays the same.")}</span></div>
+                  <Toggle label={t("Bionic reading")} checked={settings.bionicReading} onChange={(bionicReading) => update({ bionicReading })} />
+                </div>
                 <div className="settings-row">
                   <div><span className="settings-label">{t("Terminal font size")}</span><span className="settings-description">{t("Applied to every terminal pane")}</span></div>
                   <div className="settings-stepper" aria-label={t("Terminal font size")}>

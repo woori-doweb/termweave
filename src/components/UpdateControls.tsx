@@ -1,3 +1,4 @@
+import { Download } from "lucide-react";
 import { useHerdrUpdate } from "../lib/herdrUpdate.ts";
 import type { UpdatesModel } from "../lib/updates.ts";
 import "./UpdateControls.css";
@@ -58,12 +59,16 @@ export function HerdrUpdateControls({ enabled }: { enabled: boolean }) {
   </section>;
 }
 
-export function UpdateNotice({ updates, onOpen }: { updates: UpdatesModel; onOpen: () => void }) {
+/** The header's update button, left of the Chat/Terminal switch: only while not up to date. */
+export function UpdateButton({ updates }: { updates: UpdatesModel }) {
   const t = useT();
-  const { status, needsReload } = updates;
-  if (!needsReload && !status?.available && status?.phase !== "building" && status?.phase !== "restarting") return null;
-  return <div className="update-notice" role="status">
-    <span>{needsReload ? t("App updated. Save unsent drafts before reloading.") : status?.phase === "building" ? t("Preparing the update…") : status?.phase === "restarting" ? t("Updating; reconnecting shortly…") : status?.latest_version ? t("TermWeave v{version} is available.", { version: status.latest_version }) : t("A TermWeave update is available.")}</span>
-    <button type="button" className="btn" onClick={needsReload ? () => window.location.reload() : onOpen}>{t(needsReload ? "Reload app" : "View update")}</button>
-  </div>;
+  const { status, busy, request } = updates;
+  const working = status?.phase === "building" || status?.phase === "restarting";
+  if (!working && !status?.available) return null;
+  const label = working ? t("Updating…") : t("Update to v{version}", { version: status?.latest_version ?? "" });
+  return <button type="button" className="btn btn-primary header-update" disabled={busy || !!status?.blocked_reason}
+    aria-label={label} title={status?.blocked_reason ?? t("Install the new version and restart; herdr sessions keep running")}
+    onClick={() => void request("install")}>
+    <Download aria-hidden="true" /><span className="header-desktop-only">{label}</span>
+  </button>;
 }

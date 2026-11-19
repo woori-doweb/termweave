@@ -892,3 +892,46 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+## GOAT
+
+The agent fleet page is ported from [GOAT](https://github.com/goat-si/goat)'s Fleet page at 18b984275d:
+
+- Copied: `src/lib/fleetLayout.ts` and `src/lib/fleetLayout.test.ts` (`packages/client-runtime/src/state/fleetLayout.ts`),
+  `src/lib/fleetDrag.ts` and `src/lib/fleetDrag.test.ts` (`apps/web/src/components/fleet/fleetDrag.ts`); the test
+  runner swapped to `bun:test`.
+- Adapted to TermWeave's PCs, herdr panes and host status: `src/lib/fleet.ts` (`state/fleet.ts`,
+  `fleetMachineDescription.ts`), `src/lib/fleetHeat.ts` (`state/fleetHeat.ts`, `host-metrics.ts`),
+  `src/lib/fleetConnection.ts` (`state/fleetConnection.ts`, `fleetHostHealth.ts`, `components/fleet/fleetConnection.ts`),
+  `src/lib/fleetTelemetry.ts` (`components/fleet/fleetTelemetry.ts`, `fleetQuota.ts`, `fleetCount.ts`),
+  `src/components/FleetGraph.tsx`, `FleetConsole.tsx`, `FleetPanel.tsx` and `FleetPanel.css` (`components/fleet/*.tsx`
+  and the Fleet rules of `apps/web/src/index.css`), and `server/host-status.ts`
+  (`apps/server/src/resourceTelemetry/HostResources.ts`, `hostCapacity.ts`, `environment/ServerEnvironmentMachine.ts`,
+  `fleet/pressure/pressureModel.ts`), with their tests following GOAT's cases.
+- Not ported, as TermWeave has nothing they describe: Boat cloud machines, cloud agents, the OpenCodex Hub summary,
+  storage compaction, stray server clean-up, and event-loop stall alerts. GOAT's wordmark is not used.
+
+```
+MIT License
+
+Copyright (c) 2026 T3 Tools Inc.
+Copyright (c) 2026 goat-si contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

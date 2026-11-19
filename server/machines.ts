@@ -14,6 +14,7 @@ import type { CompletionTracker } from "./completion.ts";
 import { validateTarget } from "./machine-security.ts";
 import { detectHost, HERDR_INSTALL_CMD } from "./remote-host.ts";
 import { SshConnection } from "./ssh.ts";
+import { errorMessage } from "./http.ts";
 
 interface StoredMachine { id: string; name: string; target: SshTarget; enabled: boolean; snapshot?: SessionSnapshot | null }
 interface Runtime {
@@ -251,7 +252,7 @@ export class MachineManager {
         if (ownsRuntime) this.disconnect(runtime);
         if (job.public.phase !== "cancelled") {
           job.public.phase = "failed"; job.public.step = "Connection failed";
-          job.public.error = e instanceof Error ? e.message : String(e);
+          job.public.error = errorMessage(e);
           // a failed bridge update keeps its button: the bridge is still out of date, and the
           // error says why this attempt failed (no network, a password needed, …)
           if (ownsRuntime) { runtime.machine.state = "error"; runtime.machine.error = job.public.error; runtime.machine.action_required = e instanceof MachineActionRequired ? e.action : job.update && existing ? "update_bridge" : null; }
@@ -492,7 +493,7 @@ export class MachineManager {
   private lost(runtime: Runtime, generation: number, error: unknown): void {
     if (generation !== runtime.generation || !runtime.machine.enabled || this.stopped) return;
     this.disconnect(runtime);
-    runtime.machine.error = error instanceof Error ? error.message : String(error);
+    runtime.machine.error = errorMessage(error);
     if (error instanceof MachineActionRequired) {
       runtime.machine.state = "error"; runtime.machine.action_required = error.action;
       this.emit();

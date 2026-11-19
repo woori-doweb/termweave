@@ -1,7 +1,7 @@
 import { initialPaneView, readPaneView, writePaneView } from "./lib/paneView.ts";
 import { adjacentWorkspacePane } from "./lib/workspaceNavigation.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BellOff, FolderOpen, Lock, Menu, MessageSquare, MoreHorizontal, PanelLeft, Search, SquareTerminal, Users, X } from "lucide-react";
+import { Bell, BellOff, FolderOpen, Lock, Menu, MessageSquare, MoreHorizontal, Orbit, PanelLeft, Search, SquareTerminal, Users, X } from "lucide-react";
 
 import type { AgentStatus, ClientRole, ServerMessage, AccessRefusal, HealthAuth, HerdrPane } from "../shared/protocol.ts";
 import { ApiError, authenticate, fetchHealth, fetchBridgeHealth, fetchMachines, fetchSession, movePane as movePaneRequest, pairDevice, swapPanes as swapPanesRequest, sendTestPush, signOut, type HealthInfo } from "./lib/api.ts";
@@ -13,6 +13,8 @@ import { AccessGate } from "./components/AccessGate.tsx";
 import { AgentMark } from "./components/AgentMark.tsx";
 import { NewSessionDialog } from "./components/NewSessionDialog.tsx";
 import { OpenRigPanel } from "./components/OpenRigPanel.tsx";
+import { FleetPanel } from "./components/FleetPanel.tsx";
+import { observeFleetRuns } from "./lib/fleetTelemetry.ts";
 import { TerminalNotificationCenter } from "./components/TerminalNotificationsPanel.tsx";
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
@@ -41,7 +43,7 @@ import { ensurePushSubscription, pushSupported, removePushSubscription } from ".
 import { onNotificationTarget } from "./lib/notificationTarget.ts";
 import { useUpdates } from "./lib/updates.ts";
 import { FrontendControls } from "./components/FrontendControls.tsx";
-import { UpdateNotice } from "./components/UpdateControls.tsx";
+import { UpdateButton } from "./components/UpdateControls.tsx";
 import { FilesDialog } from "./components/FilesDialog.tsx";
 import { FileViewer } from "./components/FileViewer.tsx";
 import { OpenFileContext } from "./lib/filePaths.ts";
@@ -133,6 +135,8 @@ export function App() {
   const alertsOnRef = useRef(alertsOn);
   alertsOnRef.current = alertsOn;
   const [machines, setMachines] = useState<Machine[]>([]);
+  // the Fleet console's last hour counts runs seen while its page was closed too
+  useEffect(() => observeFleetRuns(machines), [machines]);
   const [selectedMachineId, setSelectedMachineId] = useState(() => {
     const query = new URLSearchParams(window.location.search);
     if (query.has("pane")) return query.get("machine") ?? "local";
@@ -212,7 +216,15 @@ export function App() {
     const url = new URL(window.location.href);
     if (url.searchParams.get("panel") === "openrig") { url.searchParams.delete("panel"); window.history.replaceState(null, "", url); }
   }, []);
-  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const [fleetOpen, setFleetOpen] = useState(() => new URLSearchParams(window.location.search).get("panel") === "fleet");
+  const closeFleet = useCallback(() => {
+    setFleetOpen(false);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("panel") === "fleet") { url.searchParams.delete("panel"); window.history.replaceState(null, "", url); }
+  }, []);
+  /** the Settings section to open at; Fleet's connection settings open it at Remote PCs */
+  const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined);
+  const closeSettings = useCallback(() => { setSettingsOpen(false); setSettingsSection(undefined); }, []);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [connected, setConnected] = useState(false);
   const [outputStopped, setOutputStopped] = useState(false);
@@ -751,7 +763,7 @@ export function App() {
             </div>
             <div className="context-sub">
               <span className="machine-context-name">{selectedMachine?.name ?? selectedMachineId}</span><span aria-hidden="true"> › </span>
-              <span>{selectedWorkspace?.label ?? selectedPane.workspace_id}</span>
+              <span className="context-workspace">{selectedWorkspace?.label ?? selectedPane.workspace_id}</span>
               {selectedPane.cwd && (
                 <>
                   <span className="context-sep" aria-hidden="true">
@@ -765,6 +777,7 @@ export function App() {
         ) : (
           <><Brand /><span className="machine-context-name">{selectedMachine?.name ?? selectedMachineId}</span></>
         )}
+        <UpdateButton updates={updates} />
         {selectedPane && (
           <div className="segmented view-switch" role="group" aria-label="Pane view">
             <button type="button" aria-pressed={view === "chat"} onClick={() => setView("chat")} title={viewHint ? `${t("Chat transcript")} (${viewHint})` : t("Chat transcript")}>
@@ -793,6 +806,7 @@ export function App() {
             <span className="conn-text">{t(connected ? "live" : outputStopped ? "disconnected" : "reconnecting")}</span>
           </span>
           {!targetHerdr && <span className="pill pill-offline">{t("herdr offline")}</span>}
+          <button type="button" className="icon-button" aria-label={t("Agent fleet")} title={t("Agent fleet")} onClick={() => setFleetOpen(true)}><Orbit aria-hidden="true" /></button>
           <button type="button" className="icon-button" aria-label={t("OpenRig teams")} title={t("OpenRig teams")} onClick={() => setOpenRigOpen(true)}><Users aria-hidden="true" /></button>
           <TerminalNotificationCenter readOnly={auth?.authenticated !== true || auth.role === "watch" || role === "observe"} onSelect={target => selectTargetRef.current("local", target.paneId)} />
           {selectedPane && (
@@ -822,7 +836,6 @@ export function App() {
         </div>
       </header>
 
-      <UpdateNotice updates={updates} onOpen={() => setSettingsOpen(true)} />
       <MachineActionBanner machines={machines} onSetup={(machine, update = false) => { setDrawerOpen(false); setUpdateRemote(update); setMachineDialog(machine); }} />
       <div className="app-body">
         <aside id="workspace-drawer" className={`sidebar${drawerOpen ? " is-open" : ""}`}>
@@ -904,8 +917,9 @@ export function App() {
         setFilesOpen(false);
         selectTargetRef.current(machineId, paneId);
       }} />
+      {fleetOpen && <FleetPanel machines={machines} onClose={closeFleet} onOpen={(machineId, paneId) => { setDrawerOpen(false); selectTargetRef.current(machineId, paneId); }} onSetup={(machine) => { setDrawerOpen(false); setUpdateRemote(false); setMachineDialog(machine); }} onConnections={() => { setSettingsSection("remote"); setSettingsOpen(true); }} />}
       {openRigOpen && <OpenRigPanel canManageService={auth?.authenticated === true && auth.role !== "watch" && role !== "observe"} readOnly={auth?.authenticated !== true || auth.role === "watch" || role === "observe"} onClose={closeOpenRig} onOpened={() => { void load(); }} />}
-      <SettingsDialog auth={auth} open={settingsOpen} onClose={closeSettings} actions={actions} updates={updates} onEnableNotifications={enableNotifications} />
+      <SettingsDialog auth={auth} open={settingsOpen} onClose={closeSettings} actions={actions} updates={updates} onEnableNotifications={enableNotifications} section={settingsSection} />
       {filesOpen && selectedPane && (
         <FilesDialog start={selectedPane.foreground_cwd ?? selectedPane.cwd ?? ""} viewing={viewing !== null} onOpenFile={viewFile} onClose={() => setFilesOpen(false)} />
       )}

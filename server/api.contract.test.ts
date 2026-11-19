@@ -51,6 +51,20 @@ describe("usage API", () => {
   });
 });
 
+describe("host status API", () => {
+  it("answers this host's readings behind the token gate", async () => {
+    const hostState = mkdtempSync(join(tmpdir(), "herdr-host-status-auth-"));
+    const open = createServer({ port: 0, stateDir: hostState });
+    const gated = createServer({ port: 0, stateDir: hostState, token: "test-host-token" });
+    try {
+      const answered = await fetch(`http://localhost:${open.port}/api/host-status`);
+      expect(answered.status).toBe(200);
+      expect((await answered.json() as { cpu_count: number }).cpu_count).toBeGreaterThan(0);
+      expect((await fetch(`http://localhost:${gated.port}/api/host-status`)).status).toBe(401);
+    } finally { open.stop(); gated.stop(); rmSync(hostState, { recursive: true, force: true }); }
+  });
+});
+
 describe("voice API", () => {
   it("keeps the key on the server, refuses cross-site writes and streams a transcript", async () => {
     const voiceState = mkdtempSync(join(tmpdir(), "herdr-voice-contract-"));

@@ -436,7 +436,7 @@ interface GitHubToken {
 
 function copilotFileTokens(source: string | null): GitHubToken[] {
   return Object.entries(record(parseJson(source))).flatMap(([host, entry]) => {
-    const token = host.startsWith("github.com") ? text(record(entry)["oauth_token"]) : null;
+    const token = host === "github.com" || host.startsWith("github.com:") ? text(record(entry)["oauth_token"]) : null;
     return token ? [{ token, login: text(record(entry)["user"]), editor: true }] : [];
   });
 }
@@ -785,6 +785,8 @@ export class UsageService {
   /** when each account may be asked again after a 429, wherever its sign-in is found next */
   private readonly backoffs = new Map<string, number>();
   private pending: Promise<UsageReport> | null = null;
+  /** the last report a pass finished, for host status to show without asking any provider */
+  private latest: UsageReport | null = null;
   private pendingRefresh = false;
 
   constructor(private readonly ctx: UsageContext = systemUsageContext(), private readonly providers: readonly UsageProvider[] = USAGE_PROVIDERS) {}
@@ -819,8 +821,12 @@ export class UsageService {
       if (group.length < 2) continue;
       group.sort((a, b) => a.key.localeCompare(b.key)).forEach((usage, i) => byKey.set(usage.key, { ...usage, account: `#${i + 1}` }));
     }
-    return { providers: [...byKey.values()] };
+    this.latest = { providers: [...byKey.values()] };
+    return this.latest;
   }
+
+  /** The last finished report, or null before any read: never asks a provider. */
+  last(): UsageReport | null { return this.latest; }
 
   private async collectProvider(provider: UsageProvider, now: number, refresh: boolean): Promise<ProviderUsage[]> {
     const search = this.searches.get(provider.id);

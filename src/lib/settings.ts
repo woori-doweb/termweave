@@ -91,6 +91,10 @@ export interface Settings {
   voicePolishChat: boolean;
   /** off by default: a terminal line is usually a command, kept as spoken */
   voicePolishTerminal: boolean;
+  /** the open workspace stands out: a ringed sidebar block with a "Current" chip, and a header pill */
+  focusHighlight: boolean;
+  /** bold the start of each word in live terminal output (src/lib/bionic.ts); off until chosen */
+  bionicReading: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -100,6 +104,8 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   density: "comfortable",
   sidebarGrouping: "workspace",
+  focusHighlight: true,
+  bionicReading: false,
   palette: "amber",
   terminalFontSize: 13,
   terminalWheelSpeed: 1,
@@ -202,6 +208,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     terminalFontFamily: sanitizeFontFamily(record["terminalFontFamily"]),
     webLinkTarget: record["webLinkTarget"] === "browser" || record["webLinkTarget"] === "aside" ? record["webLinkTarget"] : DEFAULT_SETTINGS.webLinkTarget,
     chatFontFamily: sanitizeFontFamily(record["chatFontFamily"]),
+    bionicReading: typeof record["bionicReading"] === "boolean" ? record["bionicReading"] : DEFAULT_SETTINGS.bionicReading,
+    focusHighlight: typeof record["focusHighlight"] === "boolean" ? record["focusHighlight"] : DEFAULT_SETTINGS.focusHighlight,
     enterSends: typeof record["enterSends"] === "boolean" ? record["enterSends"] : DEFAULT_SETTINGS.enterSends,
     showThinking: typeof record["showThinking"] === "boolean" ? record["showThinking"] : DEFAULT_SETTINGS.showThinking,
     keepScreenOn: typeof record["keepScreenOn"] === "boolean" ? record["keepScreenOn"] : DEFAULT_SETTINGS.keepScreenOn,
@@ -306,6 +314,9 @@ function applyToDocument(settings: Settings, resolved: ResolvedTheme, language: 
   root.dataset["theme"] = resolved;
   root.dataset["density"] = settings.density;
   root.dataset["palette"] = settings.palette;
+  root.dataset["focus"] = settings.focusHighlight ? "strong" : "subtle";
+  // PaneTerminal.css fades bionic reading's dim word ends that carry their own color
+  root.dataset["bionic"] = settings.bionicReading ? "on" : "off";
   // ChatView.css scales its type tokens by this: the chosen size over the density's
   root.style.setProperty("--chat-scale", String(chatFontSize(settings) / CHAT_BASE_FONT[settings.density]));
   // ChatView.css sets the transcript's prose in this, and falls back to --font-ui without it
@@ -315,7 +326,7 @@ function applyToDocument(settings: Settings, resolved: ResolvedTheme, language: 
   const appearance = appearanceColors(settings.appearancePreset,resolved,settings.customColors);
   for(const key of Object.keys(appearanceVariables(CUSTOM_DEFAULT)))root.style.removeProperty(key);
   if(appearance)for(const [key,value] of Object.entries(appearanceVariables(appearance)))root.style.setProperty(key,value);
-  if(settings.uiFontFamily)root.style.setProperty("--font-ui",`${settings.uiFontFamily}, sans-serif`);else root.style.removeProperty("--font-ui");
+  if(settings.uiFontFamily)root.style.setProperty("--font-ui",`${settings.uiFontFamily}, var(--font-cjk), sans-serif`);else root.style.removeProperty("--font-ui");
   root.style.colorScheme = resolved;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", appearance?.surface ?? THEME_COLOR[settings.palette][resolved]);
 }

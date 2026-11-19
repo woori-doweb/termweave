@@ -11,11 +11,13 @@ bun /absolute/path/to/termweave/scripts/pane-context.ts list
 bun /absolute/path/to/termweave/scripts/pane-context.ts read P34 --lines 80
 bun /absolute/path/to/termweave/scripts/pane-context.ts read P34 --expect-terminal term_65d61a5c5ace73
 bun /absolute/path/to/termweave/scripts/pane-context.ts p34 --lines 80
+bun /absolute/path/to/termweave/scripts/pane-context.ts wait P34 --timeout-s 600
 bun /absolute/path/to/termweave/scripts/pane-context.ts roster
 ```
 
 - `list` returns JSON metadata for all panes on the local server. It does not read terminal text.
 - `read P34` and `read p34` return JSON metadata and recent text. A bare `P34` or `p34` is a shortcut for `read`.
+- `wait P34` polls every 2 seconds until the agent in P34 stops working, then returns the same JSON as `read` with an `outcome`: `finished`, `needs_input` (the agent waits for a person), `idle` (it did not start within 10 seconds) or `timeout`. Until the agent is seen working, the first 10 seconds ignore its old `done` or `blocked`, so a prompt still on its way does not end the wait with the previous turn. `--timeout-s` takes 1 to 3600 seconds (default 600). A timeout ends only the wait; the agent keeps working. The wait fails if the P-number moves to another terminal. After GOAT's `operation.wait` (MIT).
 - `roster` lists peers in the current workspace. It teaches P-number lookup across local workspaces, even for a lone pane.
 - `roster` requires `HERDR_PANE_ID` and `HERDR_WORKSPACE_ID` to identify the current pane.
 - `--lines` accepts 1 to 2000 lines for reads. The default is 80.

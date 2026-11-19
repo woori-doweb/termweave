@@ -45,9 +45,11 @@ describe("waiting for a font", () => {
 
   it("asks for the stack at the terminal's size", async () => {
     const asked: string[] = [];
-    withFonts(async (font) => { asked.push(font); return []; });
+    let sample = "";
+    withFonts(async (font, text) => { asked.push(font); sample = text ?? ""; return []; });
     await loadFontStack('D2Coding, "Cascadia Mono"', 14);
     expect(asked).toEqual(['14px D2Coding, "Cascadia Mono"']);
+    for (const text of ["한글", "中文", "日本語", "——", "……"]) expect(sample).toContain(text);
   });
 
   it("resolves when the load fails, so the terminal goes on with its fallback", async () => {

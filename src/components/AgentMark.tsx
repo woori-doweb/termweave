@@ -166,10 +166,15 @@ const AGENT_LABELS: Record<string, string> = {
 };
 const ALIASES: Record<string, string> = { claudecode: "claude", "claude-code": "claude" };
 
-export function AgentMark({ agent: reportedAgent, size = 16, className }: AgentMarkProps) {
+/** The agent a pane reports, as its mark knows it, and the name to show for it. */
+export function agentIdentity(reportedAgent: string): { readonly agent: string; readonly label: string } {
   const normalized = reportedAgent.trim().toLowerCase() || "unknown";
   const agent = Object.hasOwn(ALIASES, normalized) ? ALIASES[normalized]! : normalized;
-  const label = Object.hasOwn(AGENT_LABELS, agent) ? AGENT_LABELS[agent]! : (reportedAgent.trim() || "Unknown agent");
+  return { agent, label: Object.hasOwn(AGENT_LABELS, agent) ? AGENT_LABELS[agent]! : (reportedAgent.trim() || "Unknown agent") };
+}
+
+export function AgentMark({ agent: reportedAgent, size = 16, className }: AgentMarkProps) {
+  const { agent, label } = agentIdentity(reportedAgent);
   const mark =
     agent === "letta" ? (
       <img src="/icons/letta.png" width={size} height={size} alt="" />

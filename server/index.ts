@@ -23,7 +23,7 @@ import { DeviceStore, handleDeviceRequest } from "./devices.ts";
 import { remoteAccess, tailscaleIdentity } from "./tailscale.ts";
 import { paneCommands } from "./commands.ts";
 import { paneFiles } from "./files.ts";
-import { badRequest, errorResponse, isCount, isJsonObject, jsonResponse } from "./http.ts";
+import { badRequest, errorResponse, isCount, isJsonObject, jsonResponse, errorMessage } from "./http.ts";
 import { serveStatic } from "./static.ts";
 import { startStatusCollector } from "./collector.ts";
 import { createPaneMesh } from "./pane-mesh.ts";
@@ -75,6 +75,7 @@ import { OUTPUT_STALLED_CLOSE_CODE } from "../shared/terminal-flow.ts";
 import { connectUpdater, handleUpdateRequest, type UpdateService } from "./update-api.ts";
 import { handleHerdrUpdateRequest, HerdrUpdater } from "./herdr-update.ts";
 import { handleUsageRequest, UsageService } from "./usage.ts";
+import { handleHostStatusRequest, HostStatusService } from "./host-status.ts";
 import { handleVoiceRequest, VoiceService } from "./voice.ts";
 
 import { BRIDGE_PROTOCOL, OWNED_STOP_HEADER, OWNED_STOP_PATH, type BridgeHealth } from "../shared/machines.ts";
@@ -357,6 +358,7 @@ export function createServer(
   /** paired devices (server/devices.ts) and the PC's Tailscale login: the two ways in besides the token and this PC itself */
   const devices = new DeviceStore(options.stateDir ?? defaultStateDir());
   const usage = options.usage ?? new UsageService();
+  const hostStatus = new HostStatusService(options.stateDir ?? defaultStateDir(), () => usage.last());
   const voice = options.voice ?? new VoiceService({ stateDir: options.stateDir ?? defaultStateDir(), env: process.env, fetch });
   /** a login named here is taken as it is: a tagged node has none of its own to read (HERDR_WEB_TAILSCALE_OWNER) */
   const namedOwner = options.tailscaleOwner !== undefined ? options.tailscaleOwner : process.env["HERDR_WEB_TAILSCALE_OWNER"]?.trim() || undefined;
@@ -989,7 +991,7 @@ export function createServer(
 
   /** The attaching client sees the error in-band; the log is the only record the operator gets. */
   function spawnFailure(paneId: string, error: unknown): string {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     console.error(`terminal attach for pane ${paneId} failed to start: ${message}`);
     return message;
   }
@@ -1234,6 +1236,7 @@ export function createServer(
       if (pathname === "/api/herdr/update") return handleHerdrUpdateRequest(request, options.herdrUpdate);
 
       if (pathname === "/api/usage") return handleUsageRequest(request, url, usage);
+      if (pathname === "/api/host-status") return handleHostStatusRequest(request, hostStatus);
       // a long clip can keep the provider silent past Bun's 10 s idle limit before the first line
       if (pathname === "/api/voice" || pathname.startsWith("/api/voice/")) { bunServer.timeout(request, 120); return handleVoiceRequest(request, pathname, voice); }
 
@@ -1450,7 +1453,7 @@ export function createServer(
               agent_started: false,
               error: {
                 code: error instanceof HerdrError ? error.code : "agent_start_failed",
-                message: error instanceof Error ? error.message : String(error),
+                message: errorMessage(error),
               },
             });
           }
@@ -1953,7 +1956,7 @@ export function createServer(
           send(client, { type: "snapshot", snapshot: await clientSnapshot(), features: SERVER_FEATURES });
         } catch (error) {
           const code = error instanceof HerdrError ? error.code : "snapshot_failed";
-          send(client, { type: "error", code, message: error instanceof Error ? error.message : String(error) });
+          send(client, { type: "error", code, message: errorMessage(error) });
         }
       },
 
@@ -2368,6 +2371,9 @@ if (import.meta.main) {
   if (process.env.TERMWEAVE_OWNED_LAUNCH === '1' && ownedStopToken.length < 32) throw new Error('Owned launch requires the launcher stop token');
   const configuredHost = process.env.HOST ?? '127.0.0.1';
   if (!LOOPBACK_HOSTNAMES.has(configuredHost) && (!process.env.HERDR_WEB_TOKEN || process.env.TERMWEAVE_EXTERNAL_ACCESS !== '1')) throw new Error('External binding requires TERMWEAVE_EXTERNAL_ACCESS=1 and a configured token');
+  // An owned install is refreshed through install.ps1/install.sh (docs/windows-fork-operations.md §4).
+  // The upstream release updater (owned-updater.ts) is not wired: it would install VoidLight00's
+  // release over this build and its swap helper needs /bin/sh.
   const instance = createServer({ updates: connectUpdater(), registerBridge: true, ...(ownedStopToken.length >= 32 ? { ownedStop: { token: ownedStopToken, stop: () => shutdown() } } : {}) });
   let stopping = false;
   const shutdown = () => {

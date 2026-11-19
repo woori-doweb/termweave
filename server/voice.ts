@@ -10,7 +10,7 @@ import {
   VOICE_DEFAULTS, VOICE_FORM, VOICE_KEYWORD_MAX_CHARS, VOICE_KEYWORDS_MAX, VOICE_MAX_AUDIO_BYTES,
   type VoiceErrorCode, type VoiceEvent, type VoiceMode, type VoiceStatus,
 } from "../shared/voice.ts";
-import { errorResponse, isJsonObject, jsonResponse } from "./http.ts";
+import { errorResponse, isJsonObject, jsonResponse, errorMessage } from "./http.ts";
 import { writePrivateFile } from "./private-file.ts";
 
 const ENV_KEY = "HERDR_WEB_OPENAI_API_KEY";
@@ -307,7 +307,7 @@ export class VoiceService {
     try {
       response = await this.fetch(`${base}/audio/transcriptions`, { method: "POST", headers: { authorization: `Bearer ${key}` }, body: form, signal: upstream });
     } catch (error) {
-      throw new VoiceError("provider_error", 502, scrub(`Could not reach the provider: ${error instanceof Error ? error.message : String(error)}`, key));
+      throw new VoiceError("provider_error", 502, scrub(`Could not reach the provider: ${errorMessage(error)}`, key));
     }
     if (!response.ok) throw await providerFailure(response, key);
 
@@ -324,7 +324,7 @@ export class VoiceService {
             ? text(record(await response.json())["text"]) ?? ""
             : await readTranscript(response.body, (delta) => send({ type: "delta", text: delta }));
         } catch (error) {
-          if (!upstream.aborted) send({ type: "error", code: "provider_error", message: scrub(error instanceof Error ? error.message : String(error), key) });
+          if (!upstream.aborted) send({ type: "error", code: "provider_error", message: scrub(errorMessage(error), key) });
           close();
           return;
         }

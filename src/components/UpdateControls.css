@@ -39,3 +39,13 @@
 .update-output[data-failed] {
   border-color: var(--status-blocked);
 }
+
+/* header: left of the Chat/Terminal switch, only while an update waits */
+.header-update {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+.header-update svg { width: 16px; height: 16px; }
