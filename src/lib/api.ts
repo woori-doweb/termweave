@@ -263,6 +263,38 @@ export async function uploadPaneImage(paneId: string, image: Blob, machineId = "
   });
 }
 
+/**
+ * POST /api/pane/path-text: the text that types `paths` into the pane, quoted by the pane's
+ * server for the shell the pane runs. ApiError 400 unsafe_path when that shell cannot safely
+ * receive one of them.
+ */
+export async function paneText(paneId: string, paths: string[], machineId = "local"): Promise<string> {
+  const url = machinePath(machineId, "pane/path-text");
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-herdr-machine": "1" },
+    body: JSON.stringify({ pane_id: paneId, paths }),
+  });
+  if (!response.ok) throw await errorFrom(url, response);
+  return ((await response.json()) as { text: string }).text;
+}
+
+/** POST /api/local/clipboard-files: the original paths of files pasted from Explorer on the server's own PC, or null when the server cannot name them. */
+export async function localClipboardPaths(files: File[]): Promise<string[] | null> {
+  try {
+    const response = await fetch("/api/local/clipboard-files", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-herdr-machine": "1" },
+      body: JSON.stringify({ files: files.map((file) => ({ name: file.name, size: file.size })) }),
+    });
+    if (!response.ok) return null;
+    const { paths } = (await response.json()) as { paths?: unknown };
+    return Array.isArray(paths) && paths.every((path) => typeof path === "string") ? paths : null;
+  } catch {
+    return null;
+  }
+}
+
 async function sendJson(url: string, method: "POST" | "PATCH" | "DELETE", body: unknown): Promise<Response> {
   const response = await fetch(url, {
     method,

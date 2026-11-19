@@ -1214,9 +1214,11 @@ button {
   }
 }
 
-/* a narrow phone header has no room for it: the command palette offers Browse files */
+/* a narrow phone header has no room for them: the command palette offers Browse files and
+   Insert file path, and the input line has its own attach button */
 @media (max-width: 480px) {
-  .files-button { display: none; }
+  .files-button,
+  .insert-path-button { display: none; }
 }
 
 /* Keep native tap overlays from obscuring the app's own pressed/selected states. */

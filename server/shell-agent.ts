@@ -31,10 +31,10 @@ export function shellAgentExecutable(kind: string, platform: string = process.pl
   return Bun.which(kind, { PATH: process.env["PATH"] ?? "" });
 }
 
-const quote = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`;
-/** cmd.exe has no escape for a quote inside quotes, and expands %NAME%. */
-function cmdQuote(word: string): string {
-  if (/["%\r\n]/.test(word)) throw new Error("this argument cannot be typed into cmd.exe");
+export const quote = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`;
+/** cmd.exe has no escape for a quote inside quotes, and expands %NAME% (and !NAME! with delayed expansion on) even inside them. */
+export function cmdQuote(word: string): string {
+  if (/["%!\r\n]/.test(word)) throw new Error("this argument cannot be typed into cmd.exe");
   // a backslash right before the closing quote would escape it for the program's own parser
   return `"${word.replace(/\\+$/, (run) => run + run)}"`;
 }
@@ -56,7 +56,7 @@ export function shellCommandLine(shell: PaneShell, executable: string, args: rea
 }
 
 interface ProcessInfo { process_info?: { shell_pid?: number; foreground_processes?: { argv?: string[] }[] } }
-const processInfo = (paneId: string) => herdrRpc<ProcessInfo>("pane.process_info", { pane_id: paneId }).catch(() => null);
+export const processInfo = (paneId: string) => herdrRpc<ProcessInfo>("pane.process_info", { pane_id: paneId }).catch(() => null);
 
 /**
  * Types the agent's absolute path and args into the pane's shell and resolves once

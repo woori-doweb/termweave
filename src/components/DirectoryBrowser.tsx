@@ -25,8 +25,10 @@ export function homeRelative(path: string, home: string): string {
   return path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path;
 }
 
+/** A Windows folder (`C:\…`, `\\server\…`) joins with its own separator: the path may be typed into a shell. */
 function childPath(parent: string, name: string): string {
-  return parent.endsWith("/") || parent.endsWith("\\") ? `${parent}${name}` : `${parent}/${name}`;
+  if (parent.endsWith("/") || parent.endsWith("\\")) return `${parent}${name}`;
+  return `${parent}${/^(?:[A-Za-z]:\\|\\\\)/.test(parent) ? "\\" : "/"}${name}`;
 }
 
 /**

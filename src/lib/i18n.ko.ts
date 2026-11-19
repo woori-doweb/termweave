@@ -206,6 +206,7 @@ export const KO: Record<string, string> = {
   "reconnecting": "재연결 중",
   "herdr offline": "herdr 꺼짐",
   "Browse files": "파일 찾아보기",
+  "Insert file path": "파일 경로 넣기",
   "Sign out": "로그아웃",
   "Retry": "다시 시도",
   "Enable notifications": "알림 켜기",
@@ -564,6 +565,10 @@ export const KO: Record<string, string> = {
 
   // ---- voice input ----
   "Without a key the browser recognizes the speech: Chrome and Edge send the audio to Google or Microsoft. Nothing is recorded until you press the mic.": "키가 없으면 브라우저가 음성을 인식합니다. Chrome과 Edge는 오디오를 Google이나 Microsoft로 보냅니다. 마이크를 누르기 전에는 녹음되지 않습니다.",
+  "The path does not fit in the box": "경로가 입력창 한도를 넘어 넣지 않았습니다",
+  "This path cannot be typed into this pane safely": "이 경로는 이 창에 안전하게 넣을 수 없습니다",
+  "Up to {n} files at a time": "한 번에 파일 {n}개까지 넣을 수 있습니다",
+  "This PC's bridge needs an update to insert paths": "이 PC의 브리지를 업데이트해야 경로를 넣을 수 있습니다",
   "The dictation does not fit in the box": "받아쓴 내용이 입력창 한도를 넘어 넣지 않았습니다",
   "No speech was heard": "말소리가 들리지 않았습니다",
   "Drops fillers and fixes spacing; code and paths stay as spoken": "군말을 지우고 띄어쓰기를 고칩니다. 코드와 경로는 말한 그대로 둡니다",

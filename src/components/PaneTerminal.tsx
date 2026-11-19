@@ -15,7 +15,7 @@ import { EMPTY_DRAFT, applyToDraft, draftIsEmpty, type InputDraft } from "../lib
 import { messageQueues } from "../lib/messageQueue.ts";
 import { MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, composerMessage, composerPayload, submitNote } from "../lib/compose.ts";
 import { answerFromText, answerHint, answerRefusal, needsConfirmation, type TypedAnswer } from "../lib/promptAnswer.ts";
-import { ApiError, fetchPaneScroll, fetchPaneSelection, openUrlInAside, scrollPane } from "../lib/api.ts";
+import { ApiError, fetchPaneScroll, fetchPaneSelection, localClipboardPaths, openUrlInAside, paneText, scrollPane } from "../lib/api.ts";
 import { parseOsc52 } from "../lib/osc52.ts";
 import { matchHerdrWidths } from "../lib/terminalWidths.ts";
 import { useMachineApi, useMachineId } from "../lib/machineContext.tsx";
@@ -28,6 +28,7 @@ import { ChatView } from "./ChatView.tsx";
 import { RenderBoundary } from "./RenderBoundary.tsx";
 import { Composer } from "./Composer.tsx";
 import type { AgentStatus, ClientRole, ConversationMetadata, InteractivePrompt, ServerMessage } from "../../shared/protocol.ts";
+import { MAX_INSERT_FILES } from "../../shared/insert-files.ts";
 import type { PaneView } from "../lib/actions.ts";
 import { createBionic } from "../lib/bionic.ts";
 import { useSettings, terminalTheme, terminalContrast, type Palette, type ResolvedTheme, type WebLinkTarget } from "../lib/settings.ts";
@@ -174,10 +175,16 @@ export function PaneTerminal({
   onServerMessage,
 }: PaneTerminalProps) {
   const t = useT();
+  /** read by the file paste and path insert handlers, whose notes follow the current language */
+  const tRef = useRef(t);
+  tRef.current = t;
   const openFile = useContext(OpenFileContext);
   const openFileRef = useRef(openFile);
   openFileRef.current = openFile;
   const machineId = useMachineId();
+  /** read by the file paste and path insert handlers, which are attached once for the terminal's life */
+  const machineIdRef = useRef(machineId);
+  machineIdRef.current = machineId;
   const { answerPanePrompt, uploadPaneImage } = useMachineApi();
   const uploadFileRef = useRef(uploadPaneImage);
   uploadFileRef.current = uploadPaneImage;
@@ -331,6 +338,8 @@ export function PaneTerminal({
   inputLineRef.current = inputLine;
   /** the input line's break (TerminalInput), for the key bar's Enter */
   const lineBreakRef = useRef<(() => void) | null>(null);
+  /** the input line's path insert (TerminalInput), for the header's file picker */
+  const insertPathsRef = useRef<((paths: string[]) => void) | null>(null);
   // input typed while disconnected, held for the user to review and send
   const [draftState, setDraftState] = useState<{ owner: string | null; value: InputDraft }>({ owner: null, value: EMPTY_DRAFT });
   const draft = draftState.value;
@@ -1162,37 +1171,68 @@ export function PaneTerminal({
     };
 
     // Browsers expose dropped files as bytes, not local paths. Save them beside
-    // the pane and paste the returned paths; never send Enter with a drop.
-    // Batches upload one after another, so overlapping drops paste their paths in the order dropped.
+    // the pane and paste the returned paths; never send Enter with a file.
+    // Batches resolve one after another, so overlapping drops paste their paths in the order dropped.
+    // The server quotes the paths for the pane's own shell, and refuses one that shell cannot
+    // take safely (a control character, or a cmd.exe metacharacter it cannot escape).
     let fileQueue: Promise<void> = Promise.resolve();
-    const uploadFiles = (files: File[]): void => {
+    const queuePaths = (pane: string, resolve: () => Promise<string[]>): void => {
+      fileQueue = fileQueue.then(async () => {
+        if (paneRef.current !== pane || !socket.connected || term.options.disableStdin) return;
+        try {
+          const text = await paneText(pane, await resolve(), machineIdRef.current);
+          // An upload can finish after the user has switched panes or lost input access.
+          if (paneRef.current !== pane || chatViewRef.current || !socket.connected || term.options.disableStdin) return;
+          term.paste(text);
+          focusTerminal();
+        } catch (error) {
+          if (paneRef.current !== pane) return;
+          if (error instanceof ApiError && error.code === "unsafe_path") noteClipboard(tRef.current("This path cannot be typed into this pane safely"));
+          // a remote PC's bridge from before this route answers it as an unknown endpoint
+          else if (error instanceof ApiError && error.code === "not_found") noteClipboard(tRef.current("This PC's bridge needs an update to insert paths"));
+          else noteClipboard(error instanceof Error ? error.message : String(error));
+        }
+      });
+    };
+    const uploadEach = async (pane: string, files: File[]): Promise<string[]> => {
+      const paths: string[] = [];
+      for (const file of files) paths.push(await uploadFileRef.current(pane, file));
+      return paths;
+    };
+    const insertFiles = (files: File[], fromClipboard: boolean): void => {
       const pane = paneRef.current;
       if (!pane || !socket.connected || term.options.disableStdin) return;
-      fileQueue = fileQueue.then(() => uploadBatch(pane, files));
-    };
-    const uploadBatch = async (pane: string, files: File[]): Promise<void> => {
-      if (paneRef.current !== pane || !socket.connected || term.options.disableStdin) return;
-      try {
-        const paths: string[] = [];
-        for (const file of files) paths.push(await uploadFileRef.current(pane, file));
-        // An upload can finish after the user has switched panes or lost input access.
-        if (paneRef.current !== pane || chatViewRef.current || !socket.connected || term.options.disableStdin) return;
-        term.paste(paths.map((path) => `'${path.replaceAll("'", "'\\''")}'`).join(" ") + " ");
-        focusTerminal();
-      } catch (error) {
-        if (paneRef.current === pane) noteClipboard(error instanceof Error ? error.message : String(error));
-      }
+      // the server takes this many paths at once: say so before anything is uploaded
+      if (files.length > MAX_INSERT_FILES) { noteClipboard(tRef.current("Up to {n} files at a time", { n: MAX_INSERT_FILES })); return; }
+      // A file Explorer copied on this PC already has a path: the server reads it from the
+      // clipboard, now, while the clipboard still holds what was pasted. A drop carries no
+      // path, and a pasted bitmap has none, so those are saved beside the pane.
+      const original = fromClipboard && machineIdRef.current === "local" ? localClipboardPaths(files) : Promise.resolve(null);
+      queuePaths(pane, async () => (await original) ?? (await uploadEach(pane, files)));
     };
     const onFilePaste = (event: ClipboardEvent): void => {
       // xterm handles text (and bracketed paste) itself. A file-only clipboard
-      // needs the upload route instead; copied paths must remain native text.
+      // needs the path or upload route instead; copied paths must remain native text.
       if (event.clipboardData?.getData("text/plain")) return;
       const files = Array.from(event.clipboardData?.files ?? []);
       if (files.length === 0) return;
       event.preventDefault();
       event.stopPropagation();
-      uploadFiles(files);
+      insertFiles(files, true);
     };
+    // The header's file picker names a file by its own path, for the pane it was opened on.
+    const onInsertPaths = (event: Event): void => {
+      const { detail } = event as CustomEvent<{ machine: string; pane: string; paths: string[] }>;
+      const pane = paneRef.current;
+      if (!detail || detail.machine !== machineIdRef.current || !pane || detail.pane !== pane || chatViewRef.current) return;
+      if (!Array.isArray(detail.paths) || detail.paths.length === 0) return;
+      // with the input line, the path joins the line being written there
+      if (inputLineRef.current) { insertPathsRef.current?.(detail.paths); return; }
+      if (!socket.connected || term.options.disableStdin) return;
+      const paths = detail.paths;
+      queuePaths(pane, async () => paths);
+    };
+    window.addEventListener("termweave:insert-paths", onInsertPaths);
     const onDragOver = (event: DragEvent): void => {
       if (!event.dataTransfer) return;
       if (!event.dataTransfer.types.some((type) => type === "Files" || type === "text/plain")) return;
@@ -1204,7 +1244,7 @@ export function PaneTerminal({
       if (!event.dataTransfer || !socket.connected || term.options.disableStdin) return;
       const files = Array.from(event.dataTransfer.files);
       if (files.length > 0) {
-        uploadFiles(files);
+        insertFiles(files, false);
         return;
       }
       const text = event.dataTransfer.getData("text/plain");
@@ -1413,6 +1453,7 @@ export function PaneTerminal({
       onMirrorKey.dispose();
       settleComposition(false);
       host.removeEventListener("paste", onFilePaste, { capture: true });
+      window.removeEventListener("termweave:insert-paths", onInsertPaths);
       host.removeEventListener("dragover", onDragOver);
       host.removeEventListener("drop", onDrop);
       offDisconnect();
@@ -1944,7 +1985,7 @@ export function PaneTerminal({
           onUploadImage={uploadImage}
         />
       )}
-      {paneId !== null && !secretActive && !observing && !ended && inputLine && <TerminalInput key={paneId} owner={paneStorageId(machineId, paneId)} paneId={paneId} onComposing={setComposing} connected={connected && !held} onSend={sendTerminalLine} onEnter={pressEnter} lineBreakRef={lineBreakRef} />}
+      {paneId !== null && !secretActive && !observing && !ended && inputLine && <TerminalInput key={paneId} owner={paneStorageId(machineId, paneId)} paneId={paneId} onComposing={setComposing} connected={connected && !held} onSend={sendTerminalLine} onEnter={pressEnter} lineBreakRef={lineBreakRef} insertPathsRef={insertPathsRef} />}
       {paneId !== null && !secretActive && !observing && !chatView && <KeyBar disabled={composing} enterDisabled={composing && !inputLine} onKey={pressKey} ctrlArmed={ctrlArmed} onToggleCtrl={toggleCtrl}
         {...(coarse ? { directTyping, onToggleDirect: toggleDirect } : {})} />}
     </div>

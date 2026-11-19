@@ -28,6 +28,7 @@ it("writes the line each shell runs as a command, not as a string", () => {
   // cmd cannot carry these inside quotes
   expect(() => shellCommandLine("cmd", "C:\\gjc\\gjc.exe", ["%PATH%"])).toThrow();
   expect(() => shellCommandLine("cmd", "C:\\gjc\\gjc.exe", ['say "hi"'])).toThrow();
+  expect(() => shellCommandLine("cmd", "C:\\gjc\\gjc.exe", ["!USERNAME!"])).toThrow();
 });
 
 it("recognizes gjc as Windows reports it", () => {
