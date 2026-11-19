@@ -49,7 +49,14 @@ EOF
   print "bump $bump: $current -> $next"
   # every feat/fix/perf/refactor since the previous release commit goes into this version's entry
   since=$(git -C "$repo" log -1 --format=%H -E --grep='^(chore\(release\)|release): v')
-  notes=$(git -C "$repo" log --format=%s ${since:+$since..}HEAD | grep -E '^(feat|fix|perf|refactor)(\(|!|:)' || print -r -- "$subject")
+  # a commit's "Release-note:" trailers (plain words for the user) replace its subject in the notes
+  notes=$(git -C "$repo" log --format='%s%x1f%(trailers:key=Release-note,valueonly,separator=%x1f)' ${since:+$since..}HEAD \
+    | python3 -c 'import re,sys
+for line in sys.stdin.read().splitlines():
+    subject, *trailers = line.split("\x1f")
+    if not re.match(r"(feat|fix|perf|refactor)(\(|!|:)", subject): continue
+    print("\n".join(t.strip() for t in trailers if t.strip()) or subject)')
+  [[ -n $notes ]] || notes=$subject
   python3 - "$repo" "$current" "$next" "$notes" <<'EOF'
 import re, sys, datetime
 repo, cur, nxt, notes = sys.argv[1:]
@@ -82,6 +89,8 @@ fi
 "$harness" flow "$repo/.local/public" --profile public-full --languages en,ko,ja,zh \
   --approve-images --approve-publish --public --release --approve-release || { print "FAIL: harness flow"; exit 1; }
 print "PASS: published $version"
+"$repo/tools/public-release/post_release_notes.sh" "$version" \
+  || print "FAIL: release notes not posted (run tools/public-release/post_release_notes.sh $version)"
 # a version bump also moves the live app (launchd com.voidlight.termweave) to this release, health-checked
 if [[ -n $bump ]] && launchctl print gui/$(id -u)/com.voidlight.termweave >/dev/null 2>&1; then
   "$repo/tools/operations/deploy-release.sh" || { print "FAIL: live deploy (previous release kept)"; exit 1; }

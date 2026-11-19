@@ -33,7 +33,7 @@ for (const file of new Bun.Glob("cmd-*.c").scanSync({cwd:tmuxRoot})) {
 const cmuxMethods = new Map<string,{source:string;line:number}[]>();
 for (const file of new Bun.Glob("Sources/TerminalController*.swift").scanSync({cwd:cmuxRoot})) {
   const text=await readFile(join(cmuxRoot,file),"utf8");
-  for(const match of text.matchAll(/case\s+((?:"[^"]+"\s*,?\s*)+):/g)) {
+  for(const match of text.matchAll(/case\s+((?:"[^"]+"\s*(?:,\s*)?)+):/g)) {
     for(const name of match[1]!.matchAll(/"([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"/g))
       cmuxMethods.set(name[1]!,[...(cmuxMethods.get(name[1]!)??[]),{source:file,line:text.slice(0,match.index).split("\n").length}]);
   }

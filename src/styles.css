@@ -67,7 +67,10 @@
   --term-selection: #4a3d26;
 
   /* type (comfortable density; compact overrides below) */
-  --font-ui: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", "Malgun Gothic", sans-serif;
+  /* Han, kana and CJK punctuation: a Korean font draws them in Korean forms and spacing, so
+     Chinese and Japanese get their own fonts first (overridden below by the page's lang) */
+  --font-cjk: "Noto Sans KR", "Malgun Gothic";
+  --font-ui: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, var(--font-cjk), sans-serif;
   --font-mono: "Symbols Nerd Font Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "D2Coding", monospace;
   --fs-2xs: 11px;
   --fs-xs: 12px;
@@ -152,6 +155,8 @@
   --droplet-ring: rgba(255, 255, 255, 0.1);
   --droplet-shadow: rgba(0, 0, 0, 0.35);
 }
+:root:lang(zh) { --font-cjk: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC"; }
+:root:lang(ja) { --font-cjk: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans CJK JP", "Noto Sans JP", "Source Han Sans JP"; }
 
 [data-theme="light"] {
   color-scheme: light;
@@ -521,6 +526,18 @@ button {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Settings › Highlight the current workspace: its name above the terminal is a pill too */
+:root[data-focus="strong"] .context-sub > .context-workspace {
+  flex: 0 1 auto;
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-tint);
+  color: var(--text-strong);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
 }
 
 .context-sep {
@@ -1171,6 +1188,10 @@ button {
 
 @media (max-width: 480px) {
   .context-sub > span:not(.machine-context-name) { display: none; }
+  /* phones: with the highlight on, the workspace pill shows in place of the PC name */
+  :root[data-focus="strong"] .context-sub > .context-workspace { display: inline; }
+  :root[data-focus="strong"] .context-sub > .machine-context-name,
+  :root[data-focus="strong"] .context-sub > .machine-context-name + span { display: none; }
 }
 
 /* just above phone width the lens labels would squeeze the pane title to a glyph: icons only */
@@ -1202,26 +1223,31 @@ button, a, [role="button"] {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* phones: the terminal gets the height. Each bar around it is one compact row; buttons with an
-   aria-label drop their visible word. :root lifts these over the component sheets loaded later. */
-@media (max-width: 640px) {
-  :root .split-workspace { display: grid; grid-template: auto auto auto auto minmax(0, 1fr) / minmax(0, 1fr) auto; }
-  :root .split-workspace > * { grid-column: 1 / -1; }
-  :root .split-workspace > .dock-existing { grid-column: 1; grid-row: 1; padding: 3px 6px; font-size: 0; }
-  :root .dock-existing select { font-size: 12px; padding: 4px 6px; }
-  :root .split-workspace > .browser-preview { grid-column: 2; grid-row: 1; padding: 3px 6px 3px 0; }
-  :root .split-workspace > .browser-preview:has(.browser-preview-body) { grid-column: 1 / -1; grid-row: 2; padding: 6px; }
-  :root .browser-preview > button { padding: 4px 8px; font-size: 12px; }
-  :root .split-workspace > .dock-phone-nav { grid-row: 3; }
-  :root .split-workspace > .split-empty { grid-row: 4; }
-  :root .split-workspace > .dock-root { grid-row: 5; }
+/* every width: the terminal gets the height. The picker shares one row with the web preview button,
+   and the tab strip shares one row with its actions; the actions wrap below only in a narrow split
+   column. Add and delete keep their aria-label and title and show the icon alone.
+   :root lifts these over the component sheets loaded later. */
+:root .split-workspace { display: grid; grid-template: auto auto auto auto minmax(0, 1fr) / minmax(0, 1fr) auto; }
+:root .split-workspace > * { grid-column: 1 / -1; }
+:root .split-workspace > .dock-existing { grid-column: 1; grid-row: 1; gap: 0; padding: 3px 6px; font-size: 0; }
+:root .dock-existing select { font-size: 12px; padding: 4px 6px; }
+:root .split-workspace > .browser-preview { grid-column: 2; grid-row: 1; padding: 3px 6px 3px 0; }
+:root .split-workspace > .browser-preview:has(.browser-preview-body) { grid-column: 1 / -1; grid-row: 2; padding: 6px; }
+:root .browser-preview > button { padding: 4px 8px; font-size: 12px; }
+:root .split-workspace > .dock-phone-nav { grid-row: 3; }
+:root .split-workspace > .split-empty { grid-row: 4; }
+:root .split-workspace > .dock-root { grid-row: 5; }
+:root .dock-tabs { flex-flow: row wrap; align-items: center; gap: 4px; padding: 2px 4px; }
+:root .dock-tab-strip { flex: 1 1 240px; }
+:root .dock-tab-actions { flex: 0 0 auto; flex-wrap: nowrap; }
+:root .dock-tab-actions .dock-add, :root .dock-tab-actions .dock-delete { font-size: 0; gap: 0; padding-inline: 8px; }
 
-  :root .dock-tabs { flex-direction: row; align-items: center; gap: 4px; padding: 2px 4px; }
+/* phones: each bar is also shorter */
+@media (max-width: 640px) {
+  :root .dock-tabs { flex-wrap: nowrap; }
   :root .dock-tab-strip { flex: 1 1 auto; height: 36px; }
   :root .dock-tab-strip button { height: 30px; min-height: 30px; }
-  :root .dock-tab-actions { flex: 0 0 auto; flex-wrap: nowrap; }
   :root .dock-tab-actions button { min-height: 34px; min-width: 34px; padding-inline: 6px; }
-  :root .dock-tab-actions .dock-add, :root .dock-tab-actions .dock-delete { font-size: 0; gap: 0; padding-inline: 8px; }
 
   :root .header-meta { gap: 2px; }
   :root .frontend-controls .frontend-refresh > span { display: none; }

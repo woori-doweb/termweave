@@ -15,9 +15,11 @@ interface Props {
   preview: DockPreview | null; acceptsDrag: (event: React.DragEvent) => boolean;
   beginDrag: (id: string) => void; previewDrag: (preview: DockPreview | null) => void;
   dragDrop: (event: React.DragEvent, target: string, edge: Edge, boundary?: number) => void;
+  /** right-click on a tab: rename that pane (SplitTerminals opens the dialog) */
+  renameTab?: (id: string) => void;
   rename?: React.ReactNode; terminate?: React.ReactNode; viewControls?: React.ReactNode; children: React.ReactNode; search?: React.ReactNode; nativeMove?: React.ReactNode; address?: React.ReactNode;
 }
-export function DockGroup({ node, panes, busy, zoomed, groupIds, activate, drop, add, split, canAdd, zoom, detach, children, search, nativeMove, address, terminate, rename, viewControls, preview, acceptsDrag, beginDrag, previewDrag, dragDrop }: Props) {
+export function DockGroup({ node, panes, busy, zoomed, groupIds, activate, drop, add, split, canAdd, zoom, detach, children, search, nativeMove, address, terminate, rename, renameTab, viewControls, preview, acceptsDrag, beginDrag, previewDrag, dragDrop }: Props) {
   const t = useT();
   const stripRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -64,7 +66,8 @@ export function DockGroup({ node, panes, busy, zoomed, groupIds, activate, drop,
         draggable onDragStart={event => { beginDrag(id); event.dataTransfer.setData(PANE_DRAG_TYPE, id); event.dataTransfer.effectAllowed = "move"; }}
         onDragOver={event => over(event, "center", boundary(event, index))}
         onDrop={event => dragDrop(event, node.id, "center", boundary(event, index))}
-        data-tab-id={id} title={displayPaneTitle(panes.find(pane => pane.pane_id === id) ?? { pane_id: id } as HerdrPane)} onClick={() => activate(id)}><span className="pane-number" data-pane-number={paneNumber(panes.find(p => p.pane_id === id))}>{paneNumber(panes.find(p => p.pane_id === id))}</span> <AgentMark agent={panes.find(p => p.pane_id === id)?.agent || "shell"} size={14} /> <span className="dock-tab-title">{displayPaneTitle(panes.find(pane => pane.pane_id === id) ?? { pane_id: id } as HerdrPane)}</span></button>)}
+        data-tab-id={id} title={displayPaneTitle(panes.find(pane => pane.pane_id === id) ?? { pane_id: id } as HerdrPane)} onClick={() => activate(id)}
+        onContextMenu={renameTab && (event => { event.preventDefault(); renameTab(id); })}><span className="pane-number" data-pane-number={paneNumber(panes.find(p => p.pane_id === id))}>{paneNumber(panes.find(p => p.pane_id === id))}</span> <AgentMark agent={panes.find(p => p.pane_id === id)?.agent || "shell"} size={14} /> <span className="dock-tab-title">{displayPaneTitle(panes.find(pane => pane.pane_id === id) ?? { pane_id: id } as HerdrPane)}</span></button>)}
       <span className={`dock-strip-end${preview?.index === node.tabs.length ? " dock-insert-end" : ""}`} aria-hidden="true" />
       </div>
       <div className="dock-tab-actions">

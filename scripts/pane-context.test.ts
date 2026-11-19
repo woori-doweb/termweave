@@ -173,3 +173,107 @@ describe("read-only pane context", () => {
     });
   });
 });
+
+describe("wait for a pane's agent", () => {
+  const fast = { pollMs: 5, graceMs: 30 };
+  /** Serves the roster with the agent status the nth session call should see. */
+  const statusAt = (statuses: string[]) => (req: Request) => {
+    const path = new URL(req.url).pathname;
+    if (path === "/api/session") {
+      const status = statuses.length > 1 ? statuses.shift()! : statuses[0]!;
+      return Response.json({ snapshot: { panes: [pane(34, { agent_status: status })] } });
+    }
+    return response(req);
+  };
+
+  it("returns when the agent finishes, with its last output", async () => {
+    await fixture(statusAt(["working", "working", "working", "done"]), async url => {
+      const output = JSON.parse(await paneContext(["wait", "P34", "--timeout-s", "5"], env(url), fast));
+      expect(output.outcome).toBe("finished");
+      expect(output.pane.agent_status).toBe("done");
+      expect(output.text).toBe("Synthetic example output.");
+      expect(output.untrusted).toBe(true);
+    });
+  });
+  it("reports an agent that waits for a person", async () => {
+    await fixture(statusAt(["working", "blocked"]), async url => {
+      expect(JSON.parse(await paneContext(["wait", "p34"], env(url), fast)).outcome).toBe("needs_input");
+    });
+  });
+  it("gives up at the timeout and leaves the agent working", async () => {
+    await fixture(statusAt(["working"]), async url => {
+      const output = JSON.parse(await paneContext(["wait", "P34", "--timeout-s", "1"], env(url), { pollMs: 50, graceMs: 30 }));
+      expect(output.outcome).toBe("timeout");
+      expect(output.pane.agent_status).toBe("working");
+    });
+  });
+  it("gives an agent that has not started a short grace, then reports it idle", async () => {
+    await fixture(statusAt(["idle"]), async url => {
+      const started = Date.now();
+      const output = JSON.parse(await paneContext(["wait", "P34"], env(url), fast));
+      expect(output.outcome).toBe("idle");
+      expect(Date.now() - started).toBeGreaterThanOrEqual(fast.graceMs);
+    });
+  });
+  it("discards the wait when the P-number moves to another terminal", async () => {
+    let calls = 0;
+    await fixture(req => {
+      const path = new URL(req.url).pathname;
+      if (path === "/api/panes/by-number/34") return Response.json(++calls > 2 ? target({ terminal_id: "terminal-99" }) : target());
+      return statusAt(["working"])(req);
+    }, async url => {
+      await expect(paneContext(["wait", "P34"], env(url), fast)).rejects.toThrow("changed");
+    });
+  });
+  it("validates the wait arguments", async () => {
+    await expect(paneContext(["wait"], {})).rejects.toThrow("P-number");
+    await expect(paneContext(["wait", "P34", "--timeout-s", "0"], {})).rejects.toThrow("1 to 3600");
+    await expect(paneContext(["list", "--timeout-s", "5"], {})).rejects.toThrow("--timeout-s");
+  });
+});
+
+describe("wait settles on this turn, not the last one", () => {
+  const fast = { pollMs: 5, graceMs: 40 };
+  const counted = (statuses: string[]) => {
+    const state = { sessions: 0 };
+    const handler = (req: Request) => {
+      const path = new URL(req.url).pathname;
+      if (path === "/api/session") {
+        state.sessions += 1;
+        const status = statuses.length > 1 ? statuses.shift()! : statuses[0]!;
+        return Response.json({ snapshot: { panes: [pane(34, { agent_status: status })] } });
+      }
+      return response(req);
+    };
+    return { state, handler };
+  };
+
+  it("does not take the previous turn's done for the turn just sent", async () => {
+    const { state, handler } = counted(["done", "done", "working", "done"]);
+    await fixture(handler, async url => {
+      const output = JSON.parse(await paneContext(["wait", "P34"], env(url), fast));
+      expect(output.outcome).toBe("finished");
+      expect(state.sessions).toBeGreaterThanOrEqual(4);
+    });
+  });
+  it("keeps waiting through a passing unknown", async () => {
+    const { handler } = counted(["working", "unknown", "working", "blocked"]);
+    await fixture(handler, async url => {
+      expect(JSON.parse(await paneContext(["wait", "P34"], env(url), fast)).outcome).toBe("needs_input");
+    });
+  });
+  it("reports the status its outcome came from", async () => {
+    const { handler } = counted(["working", "done", "working"]);
+    await fixture(handler, async url => {
+      const output = JSON.parse(await paneContext(["wait", "P34"], env(url), fast));
+      expect([output.outcome, output.pane.agent_status]).toEqual(["finished", "done"]);
+    });
+  });
+  it("calls an agent that never started idle even when the wait is shorter than the grace", async () => {
+    const { handler } = counted(["idle"]);
+    await fixture(handler, async url => {
+      const output = JSON.parse(await paneContext(["wait", "P34", "--timeout-s", "1"], env(url), { pollMs: 50, graceMs: 5000 }));
+      expect(output.outcome).toBe("idle");
+    });
+  });
+});

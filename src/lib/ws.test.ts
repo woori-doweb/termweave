@@ -187,3 +187,73 @@ it('snapshot-wait submission cannot send after another request begins draining',
   const request = socket.sent.find(frame => frame.type === 'submit')!; socket.receive({ type: 'submit-result', id: request.id, ok: true });
   expect(await first).toEqual({ ok: true }); expect((client as any).snapshotTimers.size).toBe(0); expect(socket.readyState).toBe(3);
 });
+
+/** Records the reconnect timers instead of running them; clearTimeout drops a recorded one. */
+function captureTimers(): { delays: number[]; pending: Map<number, () => void>; fire: () => void; restore: () => void } {
+  const original = { set: globalThis.setTimeout, clear: globalThis.clearTimeout };
+  const pending = new Map<number, () => void>();
+  const delays: number[] = [];
+  let next = 0;
+  (globalThis as { setTimeout: unknown }).setTimeout = (run: () => void, ms: number) => { delays.push(ms); next += 1; pending.set(next, run); return next; };
+  (globalThis as { clearTimeout: unknown }).clearTimeout = (id: number) => { pending.delete(id); };
+  const fire = () => {
+    const first = pending.entries().next().value;
+    if (!first) return;
+    pending.delete(first[0]);
+    first[1]();
+  };
+  return { delays, pending, fire, restore: () => { globalThis.setTimeout = original.set; globalThis.clearTimeout = original.clear; } };
+}
+
+it("backs off further when a connection drops right after opening", () => {
+  const random = Math.random;
+  Math.random = () => 0;
+  const timers = captureTimers();
+  try {
+    const client = new HerdrSocket("ws://test/ws"); client.connect();
+    FakeSocket.last.open(); FakeSocket.last.disconnect();
+    timers.fire();
+    FakeSocket.last.open(); FakeSocket.last.disconnect();
+    expect(timers.delays).toEqual([125, 250]);
+    client.close();
+  } finally { timers.restore(); Math.random = random; }
+});
+
+it("reconnects soon, after a short random delay, when the network comes back", () => {
+  const timers = captureTimers();
+  try {
+    const client = new HerdrSocket("ws://test/ws"); client.connect();
+    const first = FakeSocket.last;
+    first.disconnect();
+    expect(timers.pending.size).toBe(1);
+    globalThis.dispatchEvent(new Event("online"));
+    // not in the same tick: every pane's socket wakes on the same event
+    expect(FakeSocket.last).toBe(first);
+    expect(timers.pending.size).toBe(1);
+    expect(timers.delays[1]).toBeGreaterThanOrEqual(125);
+    expect(timers.delays[1]).toBeLessThanOrEqual(250);
+    timers.fire();
+    expect(FakeSocket.last).not.toBe(first);
+    client.close();
+    const scheduled = timers.delays.length;
+    globalThis.dispatchEvent(new Event("online"));
+    expect(timers.delays.length).toBe(scheduled);
+  } finally { timers.restore(); }
+});
+
+it("keeps backing off a flapping server after a wake", () => {
+  const random = Math.random;
+  Math.random = () => 0;
+  const timers = captureTimers();
+  try {
+    const client = new HerdrSocket("ws://test/ws"); client.connect();
+    FakeSocket.last.open(); FakeSocket.last.disconnect();
+    timers.fire();
+    FakeSocket.last.open(); FakeSocket.last.disconnect();
+    globalThis.dispatchEvent(new Event("online"));
+    timers.fire();
+    FakeSocket.last.disconnect();
+    expect(timers.delays).toEqual([125, 250, 125, 500]);
+    client.close();
+  } finally { timers.restore(); Math.random = random; }
+});

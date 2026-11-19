@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { unmanagedUpdateStatus, type UpdateCommand, type UpdateStatus } from "../shared/update.ts";
+import { errorMessage } from "./http.ts";
 
 export interface Release { directory: string; revision: string; source_revision: string }
 const SHA = /^[0-9a-f]{40,64}$/;
@@ -219,7 +220,7 @@ export class Updater {
           writeFileSync(join(this.options.stateDir, "failed.json"), JSON.stringify({ revision: attempted }), { mode: 0o600 });
         } catch { /* the in-memory guard still prevents repeated automatic restarts */ }
       }
-      this.patch({ phase: "error", error: error instanceof Error ? error.message : String(error) });
+      this.patch({ phase: "error", error: errorMessage(error) });
     } finally {
       if (stage) rmSync(stage, { recursive: true, force: true });
       this.busy = false;

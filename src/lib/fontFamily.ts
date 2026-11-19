@@ -73,7 +73,7 @@ export function chatFontStack(family: string): string | null {
 }
 
 // Latin and Hangul, so a font split by unicode-range loads the faces the grid measures and shows
-const FONT_LOAD_SAMPLE = "Mg가";
+const FONT_LOAD_SAMPLE = "Mg가한글中文日本語——……";
 
 /**
  * Resolves once the faces of `stack` are loaded, or failed, or the timeout passed: never rejects,

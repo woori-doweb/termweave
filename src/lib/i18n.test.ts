@@ -71,6 +71,9 @@ function labelMapKeys(): string[] {
     ...grab("lib/bridgeProgress.ts", "STAGES", /label: "([^"]+)"/g),
     ...grab("lib/workBlocks.ts", "CATEGORY_LABEL", /\["([^"]+)", "([^"]+)"\]/g),
     ...grab("lib/usage.ts", "WINDOW_LABEL", value),
+    ...grab("components/FleetPanel.tsx", "STATE_LABEL", value),
+    ...grab("components/FleetPanel.tsx", "SUBAGENT_STATUS", value),
+    ...grab("lib/fleetHeat.ts", "FLEET_HEAT_LABEL", value),
   ];
 }
 
@@ -100,8 +103,8 @@ describe.each(Object.entries(DICTIONARIES))("%s dictionary", (_name, dictionary)
   });
 
   it("is not just the English repeated", () => {
-    // names and key caps read the same in every language; Chinese UIs leave "Shell" and "Agent" in English
-    const sameOnPurpose = new Set(["PC {name}", "Control C", "Shell", "Agent"]);
+    // names, key caps and the CPU read the same in every language; Chinese UIs leave "Shell" and "Agent" in English
+    const sameOnPurpose = new Set(["PC {name}", "Control C", "Shell", "Agent", "CPU"]);
     const same = Object.entries(dictionary).filter(([en, text]) => en === text && /[a-z]{3}/i.test(en) && !sameOnPurpose.has(en));
     expect(same.map(([en]) => en)).toEqual([]);
   });

@@ -29,6 +29,7 @@ import { RenderBoundary } from "./RenderBoundary.tsx";
 import { Composer } from "./Composer.tsx";
 import type { AgentStatus, ClientRole, ConversationMetadata, InteractivePrompt, ServerMessage } from "../../shared/protocol.ts";
 import type { PaneView } from "../lib/actions.ts";
+import { createBionic } from "../lib/bionic.ts";
 import { useSettings, terminalTheme, terminalContrast, type Palette, type ResolvedTheme, type WebLinkTarget } from "../lib/settings.ts";
 import { imeEdit, imeSpaces } from "../lib/imeDiff.ts";
 import {
@@ -296,6 +297,9 @@ export function PaneTerminal({
   const { settings, update: updateSettings } = useSettings();
   const shortcutSettings = useRef(settings.shortcutOverrides);
   shortcutSettings.current = settings.shortcutOverrides;
+  // read inside the socket handler: switching it never reconnects the terminal
+  const bionicOn = useRef(settings.bionicReading);
+  bionicOn.current = settings.bionicReading;
   const directTyping = settings.terminalInputMode === "direct" || (settings.terminalInputMode === "auto" && (!coarse || storedDirectTyping()));
   const inputLine = !directTyping && !chatView;
   const inputLineRef = useRef(inputLine);
@@ -894,6 +898,7 @@ export function PaneTerminal({
     socket.setMode(role);
     term.options.disableStdin = role === "observe";
     let outputGeneration = 0;
+    const bionic = createBionic();
     /** what follows a write of the pane's output into the grid */
     const wrote = (owner: string, generation: number): void => {
       if (paneRef.current !== owner || generation !== outputGeneration) return;
@@ -921,7 +926,8 @@ export function PaneTerminal({
       if (!screen || owner === null) return;
       // its frames were acknowledged as they were taken in: this write acknowledges nothing again
       const generation = outputGeneration;
-      term.write(screen, () => wrote(owner, generation));
+      // the same stream as a direct write: bionic reading keeps its state across both
+      term.write(bionic(screen, bionicOn.current), () => wrote(owner, generation));
     };
     const off = socket.on((message) => {
       onServerMessageRef.current?.(message);
@@ -943,7 +949,7 @@ export function PaneTerminal({
         // raw pty bytes: append, never repaint, so xterm keeps the screen and selection
         const owner = message.pane_id;
         const generation = outputGeneration;
-        term.write(message.data, () => {
+        term.write(bionic(message.data, bionicOn.current), () => {
           acknowledge?.();
           wrote(owner, generation);
         });
@@ -1335,6 +1341,7 @@ export function PaneTerminal({
       term.options.fontSize = terminalFontSize;
       term.options.fontFamily = fontFamily;
       term.options.lineHeight = terminalLineHeight;
+      term.refresh(0, term.rows - 1);
       if (observeRef.current || fixedGridRef.current || chatViewRef.current) return;
       try {
         fitRef.current?.fit();
@@ -1344,8 +1351,7 @@ export function PaneTerminal({
       const pane = paneRef.current;
       if (pane) socketRef.current?.resize(pane, term.cols, term.rows, true);
     };
-    if (fontFamily === TERMINAL_FONT_STACK) apply();
-    else void loadFontStack(fontFamily, terminalFontSize).then(apply);
+    void loadFontStack(fontFamily, terminalFontSize).then(apply);
     return () => { superseded = true; };
   }, [terminalFontSize, fontFamily, terminalLineHeight]);
 

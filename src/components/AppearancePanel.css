@@ -1,6 +1,8 @@
 @font-face { font-family: "TermWeave JetBrains Mono"; src: url('/appearance/jetbrains-mono.woff2') format('woff2'); font-display: swap; font-weight: 400; }
-@font-face { font-family: "TermWeave D2Coding"; src: url('/appearance/d2coding.woff2') format('woff2'); font-display: swap; font-weight: 400; }
-@font-face { font-family: "TermWeave Noto Sans KR"; src: url('/appearance/noto-sans-kr.ttf') format('truetype'); font-display: swap; font-weight: 100 900; }
+/* the Korean faces skip Han, kana, CJK punctuation and full-width forms: they would draw them in
+   Korean forms; those fall through to --font-cjk, which follows the page language */
+@font-face { font-family: "TermWeave D2Coding"; src: url('/appearance/d2coding.woff2') format('woff2'); font-display: swap; font-weight: 400; unicode-range: U+0000-2E7F, U+3130-318F, U+3200-33FF, U+A960-A97F, U+AC00-D7FF, U+E000-F8FF, U+FB00-FE2F, U+FE50-FEFF; }
+@font-face { font-family: "TermWeave Noto Sans KR"; src: url('/appearance/noto-sans-kr.ttf') format('truetype'); font-display: swap; font-weight: 100 900; unicode-range: U+0000-2E7F, U+3130-318F, U+3200-33FF, U+A960-A97F, U+AC00-D7FF, U+E000-F8FF, U+FB00-FE2F, U+FE50-FEFF; }
 .appearance-panel { word-break: keep-all; overflow-wrap: anywhere; min-width: 0; }
 .appearance-panel label { display: grid; gap: 6px; margin-block: 10px; }
 .appearance-panel select, .appearance-panel input { min-width: 0; max-width: 100%; font-size: 16px; }
@@ -16,6 +18,6 @@
 .appearance-swatch code { font-size: 11px; color: var(--text-dim); }
 .appearance-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .appearance-actions .btn { min-height: 44px; white-space: normal; }
-.appearance-actions input { width: 180px; font-size: 12px; }
+.appearance-actions label.btn:focus-within { outline: var(--ring); outline-offset: 2px; }
 .appearance-sample { padding: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; }
 .appearance-panel summary { padding-block: 10px; cursor: pointer; }

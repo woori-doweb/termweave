@@ -24,12 +24,20 @@ export function jsonResponse(body: unknown, status = 200, headers: Record<string
   });
 }
 
+/**
+ * A caught value's message for a client. Only an Error's own message: anything else was thrown
+ * by code that never meant it as text, and its string form can carry more than a message.
+ */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "unexpected error";
+}
+
 export function errorResponse(error: unknown): Response {
   if (error instanceof HerdrError) {
     const status = error.code === "connect_failed" || error.code === "timeout" ? 502 : 404;
     return jsonResponse({ error: { code: error.code, message: error.message } }, status);
   }
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return jsonResponse({ error: { code: "internal_error", message } }, 500);
 }
 

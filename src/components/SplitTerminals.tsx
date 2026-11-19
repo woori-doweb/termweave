@@ -68,6 +68,7 @@ function DockWorkspace({ machineId, panes, primaryId, ownerId, terminal, onSelec
     return () => { window.removeEventListener('herdr-session-shell-created', completed); window.removeEventListener('termweave-dock-swap', swapped); };
   }, [machineId, ownerId, onSelectPrimary, workspace]);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<HerdrPane | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string[]>([]);
@@ -337,6 +338,7 @@ function DockWorkspace({ machineId, panes, primaryId, ownerId, terminal, onSelec
       </div>}
       terminate={pane && <TerminatePaneButton toolbar pane={pane} machineId={machineId} disabled={busy || mutationBusy || terminal.role === "observe"} onTerminated={onRefresh} />}
       rename={pane && <RenamePaneButton pane={pane} machineId={machineId} disabled={busy || mutationBusy || terminal.role === "observe"} onRenamed={onRefresh} />}
+      renameTab={busy || mutationBusy || terminal.role === "observe" ? undefined : id => { const target = roster.find(p => p.pane_id === id); if (target?.terminal_id) setRenaming(target); }}
       address={pane && <TerminalAddress key={`${machineId}:${pane.terminal_id}:${pane.pane_id}`} pane={pane} machineId={machineId} />}
       nativeMove={<NativePaneMove source={terminal.role === "observe" ? undefined : pane} panes={panes} busy={busy || !!selectCreated || mutationBusy} move={(source, target) => void nativeMove(source, target)} />}
       search={<TerminalSearch key={node.active} paneId={node.active} machineId={machineId} />}>
@@ -363,6 +365,7 @@ function DockWorkspace({ machineId, panes, primaryId, ownerId, terminal, onSelec
       onSelectPrimary(id); setFocusDropped(id);
     }}><option value="">{t("Choose terminal ({n})", { n: roster.length })}</option>{roster.map(p => <option key={p.pane_id} value={p.pane_id}>{paneNumber(p)} · {p.label || p.title || p.pane_id} · {p.tab_id} · {p.pane_id}</option>)}</select></label>
     <BrowserPanel key={machineId} machineId={machineId} />
+    {renaming && <RenamePaneButton key={renaming.pane_id} dialogOnly pane={renaming} machineId={machineId} onRenamed={onRefresh} onClose={() => setRenaming(null)} />}
     {phone && groups(tree).length > 1 && <div className="dock-phone-nav">
       <label>{t("Pane")}<select aria-label={t("Mobile pane selection")} value={zoom ?? groups(tree).find(node => node.active === primaryId)?.id ?? groups(tree)[0]!.id} onChange={event => { setZoom(event.target.value); const id = groups(tree).find(node => node.id === event.target.value)?.active; if (id) onSelectPrimary(id); }}>{groups(tree).map(node => <option key={node.id} value={node.id}>{node.active ? paneNumber(panes.find(p => p.pane_id === node.active)) : "—"}</option>)}</select></label>
     </div>}

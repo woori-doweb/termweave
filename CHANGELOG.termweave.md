@@ -3,6 +3,57 @@
 TermWeave(herdr web ui 포크)의 변경 기록입니다. 원본 프로젝트의 기록은 `CHANGELOG.md`에 있습니다.
 이 파일에는 실제 동작이나 게이트로 확인된 완료 항목만 적습니다. 일부만 끝난 항목은 "남은 일"에 따로 적습니다.
 
+## [0.3.43] - 2026-11-12
+
+- 바이오닉 리딩이 한국어에서도 확실히 보이도록 고쳤습니다. 한글 글꼴은 굵게 해도 차이가 작아서, 이제 단어 앞부분은 굵게, 나머지는 흐리게 표시합니다(예: **바이**오닉 **리딩**은). Claude Code처럼 글자에 색을 입혀 출력하는 프로그램에서도 효과가 나타나도록 함께 고쳤습니다.
+
+## [0.3.42] - 2026-11-12
+
+- 새 버전이 있으면 화면 위쪽 헤더의 '채팅/터미널' 전환 버튼 왼쪽에 'vX.Y.Z으로 업데이트' 버튼이 나타납니다. 누르면 바로 새 버전을 설치하고 다시 시작하며, 진행 중에는 '업데이트 중…'으로 표시됩니다. 최신 버전이면 버튼이 보이지 않습니다. 기존에 헤더 아래에 뜨던 알림 막대는 이 버튼으로 바뀌었습니다.
+
+## [0.3.41] - 2026-11-12
+
+- 설정 › 터미널에 '바이오닉 리딩' 스위치를 추가했습니다. 켜면 실시간으로 나오는 모든 터미널 글자에서 단어 앞부분이 굵게 표시되어 빠르게 훑어 읽을 수 있습니다(예: **안녕**하세요, **rea**ding). 한국어도 적용되고, 글자 색과 화면 배치는 그대로입니다. 화면 표시만 바뀌므로 복사한 글자와 프로그램에 전달되는 내용은 달라지지 않습니다. 켠 뒤에 새로 출력되는 글자부터 적용됩니다.
+
+## [0.3.40] - 2026-11-12
+
+- 다른 분들이 설치한 TermWeave도 새 버전이 나오면 앱 위쪽에 업데이트 알림이 뜹니다. 6시간마다 GitHub 릴리스를 확인하고, '업데이트 보기' → '업데이트 후 재시작' 버튼을 누르면 새 버전을 받아 설치한 뒤 다시 시작합니다. 새 버전이 응답하지 않으면 이전 버전으로 자동으로 되돌립니다. 터미널 세션과 설정은 그대로 유지됩니다. (scripts/install.sh로 설치한 경우에 적용됩니다.)
+
+## [0.3.39] - 2026-11-12
+
+- 터미널 위 탭(예: 'P13 goat-si/goat 저장소 리뷰')을 마우스 오른쪽 버튼으로 누르면 이름 변경 창이 바로 열립니다. 지금 이름이 미리 채워져 있어서 고친 뒤 '이름 바꾸기'를 누르면 됩니다. 사이드바에도 같은 이름이 반영됩니다.
+
+## [0.3.38] - 2026-11-12
+
+- 지금 작업 중인 작업 공간을 강하게 강조합니다. 사이드바에서는 열린 작업 공간 블록 전체를 테두리로 감싸고 '현재' 표시를 붙입니다. 터미널 위 헤더에도 작업 공간 이름이 강조되어 나옵니다. 설정 › 화면 › '현재 작업 공간 강조'에서 끌 수 있습니다.
+
+## [0.3.37] - 2026-11-12
+
+- '에이전트 현황' 맨 위에 '에이전트 연결도'를 추가했습니다. PC → 프로젝트 → P 번호 → 에이전트 순서로 선이 이어지고, 대기 중인 에이전트까지 모두 보입니다. 줄을 누르면 그 터미널이 바로 열립니다.
+
+## [0.3.36] - 2026-11-11
+
+- fix(layout): give the terminal the height at every width
+
+## [0.3.35] - 2026-11-11
+
+- fix(security): close the open CodeQL alerts in shipped code
+- fix(appearance): draw Chinese and Japanese in their own fonts
+
+## [0.3.34] - 2026-11-09
+
+- feat(fleet): port GOAT's whole Fleet page: heat, telemetry console, pullable graph
+
+## [0.3.33] - 2026-11-09
+
+- fix(fleet,wait,ws): settle waits on this turn; keep jitter and backoff on wake
+- feat(pane-context): wait until a P-number's agent stops working
+- fix(ws): jitter reconnects, back off on flaps, retry at once on return
+- feat(fleet): show every PC and its agents on one orbit map
+- fix(operations): validate Unix socket paths without realpath on sockets
+- feat(operations): verify isolated recovery before production activation
+- feat(projects): create project folders and preserve live fixes
+
 ## [0.3.32] - 2026-11-05
 
 - feat(projects): create and select an empty project folder from the folder browser, including remote PCs.
