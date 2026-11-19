@@ -603,7 +603,7 @@
   .workspace-terminal .badge { margin-left: auto; }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-height: 500px) {
   .app .sidebar { width: min(94vw, 360px); }
 }
 /* a pane dragged over another folder: a soft tint, never a side stripe */

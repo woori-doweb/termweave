@@ -49,6 +49,7 @@ import { useFileViewer } from "./lib/useFileViewer.ts";
 import { useT } from "./lib/i18n.ts";
 import { useScreenWakeLock } from "./lib/wakeLock.ts";
 import { watchDrawerSwipe } from "./lib/edgeSwipe.ts";
+import { PHONE_DRAWER_QUERY } from "./lib/phoneLayout.ts";
 import { Droplet } from "./components/Droplet.tsx";
 import { dropletAllows, endedTurn, showDroplet, trackTurn, type DropletKind } from "./lib/droplet.ts";
 
@@ -652,7 +653,7 @@ export function App() {
         setMachineDialog("new");
       },
       toggleSidebar: () => {
-        if (window.matchMedia("(max-width: 768px)").matches) setDrawerOpen((open) => !open);
+        if (window.matchMedia(PHONE_DRAWER_QUERY).matches) setDrawerOpen((open) => !open);
         else setSidebarCollapsed((collapsed) => !collapsed);
       },
       toggleTheme: () => updateSettings({ theme: resolvedTheme === "dark" ? "light" : "dark" }),

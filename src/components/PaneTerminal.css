@@ -43,6 +43,20 @@
   overflow: auto;
 }
 
+/* a touch screen's own grid is never narrower than a table needs (touchGrid.ts), so on a phone
+   it can be wider than the mount: it scrolls across instead of clipping. The finger pans it
+   through PaneTerminal's touch handlers (touch-action stays none); up and down stay the wheel.
+   The rows fit the mount, so a classic scrollbar would only cover the last one: none is shown */
+.pane-terminal[data-wide-grid]:not([data-adopted-grid]) {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.pane-terminal[data-wide-grid]:not([data-adopted-grid])::-webkit-scrollbar {
+  display: none;
+}
+
 .pane-terminal .xterm {
   padding: var(--space-2) var(--space-2) 0;
 }

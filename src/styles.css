@@ -1096,7 +1096,8 @@ button {
 
 /* ---------- mobile: sidebar becomes a drawer ---------- */
 
-@media (max-width: 768px) {
+/* narrow screens, and a phone turned sideways (wide but short); PHONE_DRAWER_QUERY in lib/phoneLayout.ts */
+@media (max-width: 768px), (pointer: coarse) and (max-height: 500px) {
   .drawer-toggle {
     display: inline-flex;
   }
@@ -1203,8 +1204,9 @@ button, a, [role="button"] {
 }
 
 /* phones: the terminal gets the height. Each bar around it is one compact row; buttons with an
-   aria-label drop their visible word. :root lifts these over the component sheets loaded later. */
-@media (max-width: 640px) {
+   aria-label drop their visible word. A phone turned sideways is wide but has even less height,
+   so it gets this too. :root lifts these over the component sheets loaded later. */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   :root .split-workspace { display: grid; grid-template: auto auto auto auto minmax(0, 1fr) / minmax(0, 1fr) auto; }
   :root .split-workspace > * { grid-column: 1 / -1; }
   :root .split-workspace > .dock-existing { grid-column: 1; grid-row: 1; padding: 3px 6px; font-size: 0; }
@@ -1238,7 +1240,7 @@ button, a, [role="button"] {
 .header-more-wrap { display: contents; }
 .header-more { display: none; position: relative; margin-left: auto; }
 .header-more-dot { position: absolute; top: 4px; right: 4px; display: flex; }
-@media (max-width: 640px) {
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   .header-more-wrap { display: block; margin-left: auto; }
   .header-more { display: inline-flex; }
   :root .app-header:has(.frontend-controls) { flex-wrap: nowrap; }
