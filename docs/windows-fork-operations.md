@@ -1,39 +1,50 @@
-# 포크 운영 지침: VoidLight00 업데이트 확인, Windows 버전 이관, 설치본 갱신과 점검
+# 포크 운영 지침: 포크 업데이트 반영, 설치본 갱신과 점검
 
 - type: 운영 지침(정본)
-- purpose: 이 포크(`woori-doweb/termweave`)에서 원본 업데이트를 확인하고, Windows 버전으로 이관하고, 로컬 설치본을 갱신·점검하는 순서를 하나로 고정한다
-- scope: 포크 `main`, `.github/workflows/voidlight-upstream-check.yml`, `install.ps1`, 실행 중인 설치본(`%LOCALAPPDATA%\termweave-owned`)
-- summary: 원본은 확인만 하고 이관은 포크에서 PR로 한다. 설치본은 멈춤 → 백업 → 새 설치 → 점검 순서로 갱신한다. 화면 이상은 앱보다 클라이언트 브라우저를 먼저 의심한다
-- 근거: 2026-11-06 세션 (Windows 버전 `054d7d6` → v0.3.32 이관 `625f31d`, 확인 워크플로 `65cf7c9`)
+- purpose: 이 포크(`woori-doweb/termweave`)를 기준으로 업데이트를 확인해 `main`에 반영하고, 로컬 설치본을 갱신·점검하는 순서를 하나로 고정한다
+- scope: 포크 `main`·`windows-native`·작업 브랜치, `install.ps1`, 실행 중인 설치본(`%LOCALAPPDATA%\termweave-owned`)
+- summary: 기준은 포크다. 원저작자 저장소는 2026-11-14부터 접근할 수 없다. 포크의 작업 브랜치를 PR로 `main`에 모은다. 설치본은 멈춤 → 백업 → 새 설치 → 점검 순서로 갱신한다. 화면 이상은 앱보다 클라이언트 브라우저를 먼저 의심한다
+- 근거: 2026-11-06 세션 (Windows 버전 `054d7d6` → v0.3.32 이관 `625f31d`), 2026-11-19 세션 (v0.3.43 이관 PR #4, 포크 작업 반영 PR #5, 기준을 포크로 확정)
 
 ## 1. 저장소 역할
 
 | 저장소 | 역할 |
 |---|---|
-| `woori-doweb/termweave` (origin) | 제품 정본. Windows 네이티브 기능은 이 포크에서 만들었다. `main`이 Windows 버전이다 |
-| `VoidLight00/termweave` (upstream) | 업데이트를 받아 오는 출처. 확인만 하고, 이 저장소에 PR로 이관하지 않는다 |
+| `woori-doweb/termweave` (origin) | 기준이자 제품 정본. `main`이 배포·설치하는 Windows 버전이다 |
+| `VoidLight00/termweave` (upstream, 원저작자) | 2026-11-14부터 404. 업데이트 출처로 쓰지 않는다. 마지막으로 받은 상태는 v0.3.43(`ac0166c`)이며 `main`에 들어 있다 |
 
-- 로컬 원격: `origin`=포크, `upstream`=`https://github.com/VoidLight00/termweave.git`.
-- 원본에 열려 있는 Windows PR(#2)은 이관 경로가 아니다. 포크 `main`이 기준이다.
+- 로컬 원격: `origin`=포크. `upstream` 원격은 남아 있어도 fetch가 실패한다.
+- 포크 안의 갈래:
+  - `main`: 기준. Windows 버전은 `windows-native@1522e42`의 트리를 한 커밋(`054d7d6`)으로 담았고, 그 위에 원저작자 v0.3.32·v0.3.43을 병합했다.
+  - `windows-native`: 다른 PC에서 쓰는 개발 브랜치. 이력이 `main`과 갈라져 있어 병합하지 않고 cherry-pick으로 옮긴다.
+  - `fix/*`, `feat/*`: `main`에서 만든 작업 브랜치.
+- 새 작업은 `main`에서 브랜치를 만들어 PR로 넣는 것을 기본으로 한다. 그러면 갈래를 옮기는 일이 줄어든다.
 - 원본 이름이 남은 곳(`package.json` 저장소 URL, `AGENTS.md` clone 주소, 설정 화면 링크, `CITATION.cff`, `CODEOWNERS`, 보안 신고 링크, herdr 플러그인 id `VoidLight00.termweave`)은 결정 전까지 바꾸지 않는다. 플러그인 id를 바꾸면 기존 설치의 설정 폴더 위치가 달라진다.
 
-## 2. 원본 업데이트 확인
-
-- 워크플로 `VoidLight00 upstream check`(`.github/workflows/voidlight-upstream-check.yml`)가 매일 00:23 UTC(09:23 KST)와 수동 실행 때 원본 `main`을 가져와 포크 `main`과 비교한다.
-- 포크 `main`이 원본을 이미 포함하면 요약에 `main already contains VoidLight00 <sha>`를 남긴다.
-- 포함하지 않으면 `VoidLight00 update pending` 경고를 띄우고, 요약에 남은 커밋 목록과 병합 충돌 파일 목록을 남긴다.
-- 포크는 Issues가 꺼져 있어 알림은 실행 결과의 경고로만 남는다.
-- 상속된 `Observe upstream candidates`(`upstream-watch.yml`)는 원본 자체의 상위 프로젝트(herdr-web-ui, herdr, cmux)를 감시한다. 포크에는 `upstream-watch-state` 브랜치가 없어 HTTP 404로 실패하므로 Actions API로 비활성화했다. 원본 병합 때 충돌하지 않도록 파일은 그대로 둔다.
-
-로컬에서 확인하는 방법:
+## 2. 포크 업데이트 확인
 
 ```sh
-git fetch origin && git fetch upstream
-git rev-list --left-right --count origin/main...upstream/main   # 오른쪽 수 = 아직 이관하지 않은 원본 커밋
-git merge-tree --write-tree --name-only origin/main upstream/main # 종료 코드 1이면 충돌 파일이 출력된다
+git fetch --prune origin
+# 브랜치마다 "main에만 있는 수 / 그 브랜치에만 있는 수"
+for b in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin | grep -v HEAD); do
+  echo "$b $(git rev-list --left-right --count origin/main...$b)"; done
+git log --oneline origin/main..origin/windows-native   # 아직 main에 없는 windows-native 커밋 후보
 ```
 
-## 3. Windows 버전으로 이관하기 (포크에서)
+- `windows-native`는 이력이 갈라져 있어 위 목록에 이미 옮긴 커밋도 나온다. 옮긴 커밋은 `main` 쪽 메시지의 `(cherry picked from commit <sha>)`로 확인한다. 2026-11-19 기준 `75247b6`까지 옮겼다(PR #5).
+- 병합된 PR의 브랜치(`sync/*`, `fix/*`)는 오른쪽 수가 0이다.
+- 워크플로 `VoidLight00 upstream check`(`voidlight-upstream-check.yml`)는 원저작자 저장소가 404가 된 뒤 매일 실패해서 Actions API로 비활성화했다. 상속된 `Observe upstream candidates`(`upstream-watch.yml`)도 비활성 상태다. 두 파일은 그대로 둔다.
+
+## 3. `main`으로 반영하기
+
+### 3.1 포크 작업 브랜치
+
+1. `git switch -c sync/<이름> origin/main`.
+2. `main`에서 만든 브랜치는 PR로 바로 넣는다. `windows-native` 커밋은 `git cherry-pick -x <sha>...`로 옮긴다.
+3. 충돌은 아래 3.2의 원칙으로 풀고, 같은 i18n 키가 두 번 들어오지 않았는지 타입 검사(TS1117)로 확인한다. 예: 드라이브 목록의 `"This PC"`는 함대 화면의 `"This PC"`와 겹쳐 `"Drives"`로 바꿨다.
+4. 검증, PR, 병합은 3.2의 4~7단계와 같다.
+
+### 3.2 원저작자 업데이트 (저장소가 다시 열릴 때만)
 
 1. 작업 트리를 깨끗하게 하고 `git switch -c sync/upstream-<버전> origin/main`으로 이관 브랜치를 만든다.
 2. `git merge --no-ff --no-commit upstream/main`을 실행한다. 원본 이력이 남도록 rebase나 squash를 쓰지 않는다.
@@ -58,6 +69,7 @@ git merge-tree --write-tree --name-only origin/main upstream/main # 종료 코�
    - CI(`TermWeave isolated verification`)는 `pull_request`와 `main`·`windows-native` push에서만 돈다. 브랜치 push만으로는 돌지 않는다.
    - PR 제목은 semantic 규칙(`feat`/`fix`/`chore`/`docs`/`ci` 등)을 따른다. `merge(...)`는 `PR triage`의 title 검사에서 실패한다.
 6. 검사(Windows·macOS·Ubuntu verify, CodeQL, PR triage)가 모두 성공하면 merge 커밋 방식으로 병합한다.
+   - `verify (macos-15)`가 정확히 15분 만에 `cancelled`면 check-run 주석을 본다. `The job was not acquired by Runner`는 GitHub의 macOS 실행기 부족이라 코드 문제가 아니다. 다시 실행하고, 계속 배정되지 않으면 나머지 검사로 병합한 뒤 `main` push 실행에서 macOS 통과를 확인한다.
 7. 병합 직후 `main` push 실행이 `cancelled`로 끝날 수 있다. 이때는 그 실행을 다시 돌려(`POST /actions/runs/<id>/rerun`) 성공을 확인한다.
 
 ## 4. 실행 중인 설치본 갱신
