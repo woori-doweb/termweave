@@ -433,6 +433,7 @@ export const KO: Record<string, string> = {
   "Left": "왼쪽",
   "Right": "오른쪽",
   "Control C": "Control C",
+  "Enter": "엔터",
 
   // ---- prompt card ----
   "Submit": "제출",

@@ -111,6 +111,11 @@ export function KeyBar({ onKey, ctrlArmed, onToggleCtrl, directTyping, onToggleD
       <Key disabled={disabled} dataKey="ctrl-c" label={t("Control C")} onPress={() => onKey("ctrl-c")}>
         ^C
       </Key>
+      {/* last, at the right end where a keyboard's Enter sits: a soft keyboard's own Enter may
+          not reach the terminal as one, and a prompt or a full-screen program needs it */}
+      <Key disabled={disabled} dataKey="Enter" label={t("Enter")} onPress={() => onKey("Enter")}>
+        Enter
+      </Key>
     </div>
   );
 }
