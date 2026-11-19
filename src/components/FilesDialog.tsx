@@ -10,11 +10,13 @@ export interface FilesDialogProps {
   /** a file is open above this dialog: Escape belongs to the viewer, which closes first */
   viewing: boolean;
   onOpenFile: (path: string) => void;
+  /** given, the dialog picks a path for the pane's input instead: a file click hands it here, not to the viewer */
+  onInsertPath?: (path: string) => void;
   onClose: () => void;
 }
 
-/** The files of the pane's folder (and any other), each opened in the file viewer. */
-export function FilesDialog({ start, viewing, onOpenFile, onClose }: FilesDialogProps) {
+/** The files of the pane's folder (and any other), each opened in the file viewer or picked as a path to insert. */
+export function FilesDialog({ start, viewing, onOpenFile, onInsertPath, onClose }: FilesDialogProps) {
   const t = useT();
   useEffect(() => {
     if (viewing) return;
@@ -26,11 +28,11 @@ export function FilesDialog({ start, viewing, onOpenFile, onClose }: FilesDialog
     <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <section className="modal files-dialog" role="dialog" aria-modal="true" aria-labelledby="files-dialog-title">
         <header className="modal-header">
-          <h2 className="modal-title" id="files-dialog-title">{t("Files")}</h2>
+          <h2 className="modal-title" id="files-dialog-title">{onInsertPath ? t("Insert file path") : t("Files")}</h2>
           <button type="button" className="icon-button" aria-label={t("Close files")} onClick={onClose}><X aria-hidden="true" /></button>
         </header>
         <div className="modal-body">
-          <DirectoryBrowser start={start} onOpenFile={onOpenFile} />
+          <DirectoryBrowser start={start} onOpenFile={onInsertPath ?? onOpenFile} />
         </div>
       </section>
     </div>

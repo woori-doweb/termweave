@@ -1,7 +1,7 @@
 import { initialPaneView, readPaneView, writePaneView } from "./lib/paneView.ts";
 import { adjacentWorkspacePane } from "./lib/workspaceNavigation.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BellOff, FolderOpen, Lock, Menu, MessageSquare, MoreHorizontal, Orbit, PanelLeft, Search, SquareTerminal, Users, X } from "lucide-react";
+import { Bell, BellOff, FolderOpen, Lock, Menu, MessageSquare, MoreHorizontal, Orbit, PanelLeft, Paperclip, Search, SquareTerminal, Users, X } from "lucide-react";
 
 import type { AgentStatus, ClientRole, ServerMessage, AccessRefusal, HealthAuth, HerdrPane } from "../shared/protocol.ts";
 import { ApiError, authenticate, fetchHealth, fetchBridgeHealth, fetchMachines, fetchSession, movePane as movePaneRequest, pairDevice, swapPanes as swapPanesRequest, sendTestPush, signOut, type HealthInfo } from "./lib/api.ts";
@@ -51,6 +51,7 @@ import { useFileViewer } from "./lib/useFileViewer.ts";
 import { useT } from "./lib/i18n.ts";
 import { useScreenWakeLock } from "./lib/wakeLock.ts";
 import { watchDrawerSwipe } from "./lib/edgeSwipe.ts";
+import { PHONE_DRAWER_QUERY } from "./lib/phoneLayout.ts";
 import { Droplet } from "./components/Droplet.tsx";
 import { dropletAllows, endedTurn, showDroplet, trackTurn, type DropletKind } from "./lib/droplet.ts";
 
@@ -203,8 +204,10 @@ export function App() {
   const [, refreshPaneViews] = useState(0);
   const [view, setViewState] = useState<PaneView>("terminal");
   const [paletteOpen, setPaletteOpen] = useState(false);
-  // the Files dialog, and the file open in the viewer (a path as the chat or the dialog gave it)
-  const [filesOpen, setFilesOpen] = useState(false);
+  // the Files dialog (viewing files, or picking one whose path goes into the pane's input), and the
+  // file open in the viewer (a path as the chat or the dialog gave it). A pick keeps the pane it was
+  // opened for: its path must not go into whichever pane is selected when the file is clicked.
+  const [filesDialog, setFilesDialog] = useState<null | { mode: "view" } | { mode: "insert"; machine: string; pane: string; start: string }>(null);
   const { viewing, openFile, closeFile } = useFileViewer();
   const viewFile = useCallback((path: string) => {
     openFile({ path, paneId: selectedPaneId, machineId: selectedMachineId });
@@ -572,6 +575,14 @@ export function App() {
   }, []);
 
   const selectedPane = snapshot?.panes.find((pane) => pane.pane_id === selectedPaneId) ?? null;
+  const openInsertPath = useCallback(() => {
+    if (!selectedPane) return;
+    setFilesDialog({ mode: "insert", machine: selectedMachineId, pane: selectedPane.pane_id, start: selectedPane.foreground_cwd ?? selectedPane.cwd ?? "" });
+  }, [selectedMachineId, selectedPane]);
+  // a pick open for one pane closes once another is selected, rather than typing into a pane not in view
+  useEffect(() => {
+    setFilesDialog((open) => open?.mode === "insert" && (open.machine !== selectedMachineId || open.pane !== selectedPaneId) ? null : open);
+  }, [selectedMachineId, selectedPaneId]);
   useScreenWakeLock(settings.keepScreenOn && locked === false && selectedPane !== null);
   const selectedWorkspace = selectedPane
     ? (snapshot?.workspaces.find((workspace) => workspace.workspace_id === selectedPane.workspace_id) ?? null)
@@ -664,7 +675,7 @@ export function App() {
         setMachineDialog("new");
       },
       toggleSidebar: () => {
-        if (window.matchMedia("(max-width: 768px)").matches) setDrawerOpen((open) => !open);
+        if (window.matchMedia(PHONE_DRAWER_QUERY).matches) setDrawerOpen((open) => !open);
         else setSidebarCollapsed((collapsed) => !collapsed);
       },
       toggleTheme: () => updateSettings({ theme: resolvedTheme === "dark" ? "light" : "dark" }),
@@ -693,9 +704,11 @@ export function App() {
           await onMoved(result, machineId, request.workspace_id);
         } finally { movePendingRef.current = 0; setNativeMovePending(false); }
       },
-      openFiles: selectedPaneId !== null ? () => { setDrawerOpen(false); setFilesOpen(true); } : null,
+      openFiles: selectedPaneId !== null ? () => { setDrawerOpen(false); setFilesDialog({ mode: "view" }); } : null,
+      // the chat lens has its own composer, with its own attach button
+      insertPath: selectedPane !== null && view !== "chat" ? () => { setDrawerOpen(false); openInsertPath(); } : null,
     }),
-    [selectPane, selectedPaneId, selectedMachineId, setView, view, updateSettings, resolvedTheme, canSignOut, lock, bellVisible, bell.on, enableNotifications, load, onMoved, t],
+    [selectPane, selectedPaneId, selectedPane, openInsertPath, selectedMachineId, setView, view, updateSettings, resolvedTheme, canSignOut, lock, bellVisible, bell.on, enableNotifications, load, onMoved, t],
   );
 
   useShortcuts(actions, locked === false);
@@ -810,8 +823,13 @@ export function App() {
           <button type="button" className="icon-button" aria-label={t("OpenRig teams")} title={t("OpenRig teams")} onClick={() => setOpenRigOpen(true)}><Users aria-hidden="true" /></button>
           <TerminalNotificationCenter readOnly={auth?.authenticated !== true || auth.role === "watch" || role === "observe"} onSelect={target => selectTargetRef.current("local", target.paneId)} />
           {selectedPane && (
-            <button type="button" className="icon-button files-button" aria-label={t("Browse files")} title={t("Browse files")} onClick={() => setFilesOpen(true)}>
+            <button type="button" className="icon-button files-button" aria-label={t("Browse files")} title={t("Browse files")} onClick={() => setFilesDialog({ mode: "view" })}>
               <FolderOpen />
+            </button>
+          )}
+          {selectedPane && view !== "chat" && (
+            <button type="button" className="icon-button insert-path-button" aria-label={t("Insert file path")} title={t("Insert file path")} onClick={openInsertPath}>
+              <Paperclip />
             </button>
           )}
           <button type="button" className="icon-button" aria-label={t("Command palette")} title={paletteHint ? `${t("Command palette")} (${paletteHint})` : t("Command palette")} onClick={() => setPaletteOpen(true)}>
@@ -914,14 +932,26 @@ export function App() {
         // an ended pane's card outlives the pane: the refetch has dropped it, and selecting it attaches nothing
         if (!machinesRef.current.find((m) => m.id === machineId)?.snapshot?.panes.some((p) => p.pane_id === paneId)) return;
         // Files lists the pane it was opened on, and would open its paths on the new one
-        setFilesOpen(false);
+        setFilesDialog(null);
         selectTargetRef.current(machineId, paneId);
       }} />
       {fleetOpen && <FleetPanel machines={machines} onClose={closeFleet} onOpen={(machineId, paneId) => { setDrawerOpen(false); selectTargetRef.current(machineId, paneId); }} onSetup={(machine) => { setDrawerOpen(false); setUpdateRemote(false); setMachineDialog(machine); }} onConnections={() => { setSettingsSection("remote"); setSettingsOpen(true); }} />}
       {openRigOpen && <OpenRigPanel canManageService={auth?.authenticated === true && auth.role !== "watch" && role !== "observe"} readOnly={auth?.authenticated !== true || auth.role === "watch" || role === "observe"} onClose={closeOpenRig} onOpened={() => { void load(); }} />}
       <SettingsDialog auth={auth} open={settingsOpen} onClose={closeSettings} actions={actions} updates={updates} onEnableNotifications={enableNotifications} section={settingsSection} />
-      {filesOpen && selectedPane && (
-        <FilesDialog start={selectedPane.foreground_cwd ?? selectedPane.cwd ?? ""} viewing={viewing !== null} onOpenFile={viewFile} onClose={() => setFilesOpen(false)} />
+      {filesDialog?.mode === "view" && selectedPane && (
+        <FilesDialog start={selectedPane.foreground_cwd ?? selectedPane.cwd ?? ""} viewing={viewing !== null} onOpenFile={viewFile} onClose={() => setFilesDialog(null)} />
+      )}
+      {filesDialog?.mode === "insert" && (
+        <FilesDialog
+          start={filesDialog.start}
+          viewing={viewing !== null}
+          onOpenFile={viewFile}
+          onInsertPath={(path) => {
+            window.dispatchEvent(new CustomEvent("termweave:insert-paths", { detail: { machine: filesDialog.machine, pane: filesDialog.pane, paths: [path] } }));
+            setFilesDialog(null);
+          }}
+          onClose={() => setFilesDialog(null)}
+        />
       )}
       {viewing !== null && <MachineContext.Provider value={viewing.machineId}>
         <FileViewer key={viewing.path} path={viewing.path} paneId={viewing.paneId} onClose={closeFile} onOpen={(path) => openFile({ ...viewing, path })} />

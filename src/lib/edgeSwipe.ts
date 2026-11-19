@@ -1,9 +1,12 @@
 /*
  * The workspace drawer follows a phone's finger: a swipe in from the left edge opens it,
- * as the menu button does, and a swipe to the left closes it again. Only at the drawer's
- * width (<=768px, styles.css) and only for a mostly horizontal stroke, so the terminal's
- * one-finger scrolling and the transcript's vertical scrolling keep working.
+ * as the menu button does, and a swipe to the left closes it again. Only while the sidebar
+ * is a drawer (PHONE_DRAWER_QUERY: a narrow screen or a phone turned sideways) and only for
+ * a mostly horizontal stroke, so the terminal's one-finger scrolling and the transcript's
+ * vertical scrolling keep working.
  */
+
+import { PHONE_DRAWER_QUERY } from "./phoneLayout.ts";
 
 /** A stroke has to start this close to the left edge to open the drawer. */
 export const EDGE_PX = 24;
@@ -54,7 +57,7 @@ function selecting(): boolean {
 
 /** Listens on the whole document; returns the cleanup. */
 export function watchDrawerSwipe(isOpen: () => boolean, setOpen: (open: boolean) => void): () => void {
-  const narrow = window.matchMedia("(max-width: 768px)");
+  const narrow = window.matchMedia(PHONE_DRAWER_QUERY);
   let start: { x: number; y: number; open: boolean } | null = null;
   // a recognised swipe owns the stroke until the finger lifts, after the drawer moved too
   let claimed = false;

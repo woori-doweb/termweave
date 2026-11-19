@@ -48,7 +48,9 @@ export async function checkTerminalFileInput(page: Page, socket: WebSocket): Pro
     const response = await uploaded;
     assert.equal(response.status(), 200);
     const body: { path: string } = await response.json();
-    assert.equal(unbracket(await fileInput), `'${body.path.replaceAll("'", "'\\''")}' `, "file input pastes only the quoted path, with no Enter");
+    // the test root has no spaces or quotes, so the pane's shell takes the saved path bare
+    assert.match(body.path, /^[\p{L}\p{N}_.\/:\\-]+$/u);
+    assert.equal(unbracket(await fileInput), `${body.path} `, "file input pastes only the quoted path, with no Enter");
     assert.match(body.path, /monthly-report-.*\.json$/);
   }
   console.log("PASS terminal path drop, native path paste and JSON file drop/paste");

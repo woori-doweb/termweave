@@ -389,6 +389,8 @@ export interface DirectoryListing {
   truncated: boolean;
   /** the files beside the folders, when asked for (`files=1`), sorted, within the same cap */
   files?: { name: string; size: number }[];
+  /** a Windows PC's drives (`C:\` …): up from a drive's root lists them */
+  roots?: string[];
 }
 
 /** How the file viewer shows a file. */

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, FileText, Folder, FolderPlus, House } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { ArrowUp, FileText, Folder, FolderPlus, HardDrive, House } from "lucide-react";
 
 import "./DirectoryBrowser.css";
 
@@ -25,8 +25,18 @@ export function homeRelative(path: string, home: string): string {
   return path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path;
 }
 
+/** A Windows folder (`C:\…`, `\\server\…`) joins with its own separator: the path may be typed into a shell. */
 function childPath(parent: string, name: string): string {
-  return parent.endsWith("/") ? `${parent}${name}` : `${parent}/${name}`;
+  if (parent.endsWith("/") || parent.endsWith("\\")) return `${parent}${name}`;
+  return `${parent}${/^(?:[A-Za-z]:\\|\\\\)/.test(parent) ? "\\" : "/"}${name}`;
+}
+
+/**
+ * A click that opens a folder, or the first click of a double-click: a double-click (how a folder
+ * opens on a desktop) would land its second click on whatever folder the next listing put there.
+ */
+function firstClick(event: MouseEvent): boolean {
+  return event.detail <= 1;
 }
 
 /**
@@ -44,6 +54,8 @@ export function DirectoryBrowser({ start, onPick, onOpenFile, onBusyChange }: Di
   const [hidden, setHidden] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // up from a drive's root (Windows): the PC's drives, listed in place of the folders
+  const [drives, setDrives] = useState(false);
   const request = useRef(0);
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -56,12 +68,15 @@ export function DirectoryBrowser({ start, onPick, onOpenFile, onBusyChange }: Di
       const next = await fetchDirectories(path, showHidden, onOpenFile !== undefined);
       if (id !== request.current) return;
       setListing(next);
+      setDrives(false);
       setError(null);
       listRef.current?.scrollTo({ top: 0 });
     } catch (reason: unknown) {
       if (id !== request.current) return;
       // a path typed half-way opens home instead of an error
       if (fallbackHome && reason instanceof ApiError && reason.code === "invalid_cwd") return void open("", showHidden, false);
+      // a drive that cannot be read: Up still leads back to the drives
+      setDrives(false);
       setError(reason instanceof ApiError && reason.status === 404
         ? t("This PC's bridge cannot browse folders yet. Type the path instead.")
         : reason instanceof ApiError && reason.code === "invalid_cwd" ? t("This folder cannot be opened.") : t("Folders could not be loaded."));
@@ -73,7 +88,15 @@ export function DirectoryBrowser({ start, onPick, onOpenFile, onBusyChange }: Di
   useEffect(() => { void open(start, false, true); }, []);
 
   const path = listing?.path ?? "";
-  const shown = listing ? homeRelative(listing.path, listing.home) : start || "~";
+  const roots = listing?.roots ?? [];
+  // a drive's root has no parent, but the other drives are one step up
+  const canGoUp = listing !== null && !drives && (listing.parent !== null || roots.length > 1);
+  const goUp = (): void => {
+    if (!listing) return;
+    if (listing.parent !== null) void open(listing.parent, hidden, false);
+    else if (roots.length > 1) { setCreating(false); setDrives(true); }
+  };
+  const shown = drives ? t("Drives") : listing ? homeRelative(listing.path, listing.home) : start || "~";
 
   const createFolder = async () => {
     if (!listing || saving || !folderName.trim()) return;
@@ -96,14 +119,14 @@ export function DirectoryBrowser({ start, onPick, onOpenFile, onBusyChange }: Di
   return (
     <div className="dir-browser" role="group" aria-label={t("Choose a folder")} aria-busy={loading}>
       <div className="dir-browser-bar">
-        <button type="button" className="icon-button" aria-label={t("Parent folder")} title={t("Parent folder")} disabled={!listing?.parent || loading || saving} onClick={() => listing?.parent && void open(listing.parent, hidden, false)}>
+        <button type="button" className="icon-button" aria-label={t("Parent folder")} title={t("Parent folder")} disabled={!canGoUp || loading || saving} onClick={goUp}>
           <ArrowUp aria-hidden="true" />
         </button>
-        <button type="button" className="icon-button" aria-label={t("Home folder")} title={t("Home folder")} disabled={loading || saving || (listing !== null && listing.path === listing.home)} onClick={() => void open("", hidden, false)}>
+        <button type="button" className="icon-button" aria-label={t("Home folder")} title={t("Home folder")} disabled={loading || saving || (listing !== null && !drives && listing.path === listing.home)} onClick={() => void open("", hidden, false)}>
           <House aria-hidden="true" />
         </button>
-        <span className="dir-browser-path" title={path}><span dir="ltr">{shown}</span></span>
-        {onPick && <button type="button" className="btn" disabled={!listing || loading || saving} aria-expanded={creating} onClick={() => { setCreating(!creating); setCreateError(null); }}>
+        <span className="dir-browser-path" title={drives ? shown : path}><span dir="ltr">{shown}</span></span>
+        {onPick && <button type="button" className="btn" disabled={!listing || drives || loading || saving} aria-expanded={creating} onClick={() => { setCreating(!creating); setCreateError(null); }}>
           <FolderPlus aria-hidden="true" />{t("New project folder")}
         </button>}
       </div>
@@ -123,25 +146,33 @@ export function DirectoryBrowser({ start, onPick, onOpenFile, onBusyChange }: Di
       {error !== null ? <p className="dir-browser-note dir-browser-error" role="alert">{error}</p> : (
         <ul className="dir-browser-list" ref={listRef}>
           {listing === null && <li className="dir-browser-note" role="status">{t("Loading…")}</li>}
-          {listing?.directories.map((name) => (
+          {drives && roots.map((root) => (
+            <li key={`drive:${root}`}>
+              <button type="button" className="dir-browser-item" disabled={loading || saving} onClick={(event) => firstClick(event) && void open(root, hidden, false)}>
+                <HardDrive aria-hidden="true" />
+                <span>{root}</span>
+              </button>
+            </li>
+          ))}
+          {!drives && listing?.directories.map((name) => (
             <li key={name}>
-              <button type="button" className="dir-browser-item" disabled={loading || saving} onClick={() => void open(childPath(path, name), hidden, false)}>
+              <button type="button" className="dir-browser-item" disabled={loading || saving} onClick={(event) => firstClick(event) && void open(childPath(path, name), hidden, false)}>
                 <Folder aria-hidden="true" />
                 <span>{name}</span>
               </button>
             </li>
           ))}
-          {onOpenFile !== undefined && listing?.files?.map((file) => (
+          {!drives && onOpenFile !== undefined && listing?.files?.map((file) => (
             <li key={`file:${file.name}`}>
-              <button type="button" className="dir-browser-item is-file" disabled={loading || saving} onClick={() => onOpenFile(childPath(path, file.name))}>
+              <button type="button" className="dir-browser-item is-file" disabled={loading || saving} onClick={(event) => firstClick(event) && onOpenFile(childPath(path, file.name))}>
                 <FileText aria-hidden="true" />
                 <span>{file.name}</span>
                 <span className="dir-browser-size">{formatBytes(file.size)}</span>
               </button>
             </li>
           ))}
-          {listing !== null && listing.directories.length === 0 && (listing.files ?? []).length === 0 && <li className="dir-browser-note">{t(onOpenFile ? "Nothing here" : "No folders here")}</li>}
-          {listing?.truncated && <li className="dir-browser-note">{t("Showing the first {n} folders; type the rest of the path to go further.", { n: listing.directories.length })}</li>}
+          {listing !== null && !drives && listing.directories.length === 0 && (listing.files ?? []).length === 0 && <li className="dir-browser-note">{t(onOpenFile ? "Nothing here" : "No folders here")}</li>}
+          {!drives && listing?.truncated && <li className="dir-browser-note">{t("Showing the first {n} folders; type the rest of the path to go further.", { n: listing.directories.length })}</li>}
         </ul>
       )}
       <div className="dir-browser-footer">
@@ -149,7 +180,7 @@ export function DirectoryBrowser({ start, onPick, onOpenFile, onBusyChange }: Di
           <input type="checkbox" checked={hidden} disabled={saving || (loading && listing === null)} onChange={(event) => { setHidden(event.target.checked); if (listing) void open(listing.path, event.target.checked, false); }} />
           {t("Show hidden")}
         </label>
-        {onPick && <button type="button" className="btn btn-primary" disabled={listing === null || loading || saving} onClick={() => listing && onPick(homeRelative(listing.path, listing.home))}>
+        {onPick && <button type="button" className="btn btn-primary" disabled={listing === null || loading || saving || drives} onClick={() => listing && onPick(homeRelative(listing.path, listing.home))}>
           {t("Use this folder")}
         </button>}
       </div>

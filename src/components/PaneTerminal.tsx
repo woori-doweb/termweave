@@ -15,7 +15,7 @@ import { EMPTY_DRAFT, applyToDraft, draftIsEmpty, type InputDraft } from "../lib
 import { messageQueues } from "../lib/messageQueue.ts";
 import { MAX_COMPOSER_CHARS, QUEUE_READY_STATUS, composerMessage, composerPayload, submitNote } from "../lib/compose.ts";
 import { answerFromText, answerHint, answerRefusal, needsConfirmation, type TypedAnswer } from "../lib/promptAnswer.ts";
-import { ApiError, fetchPaneScroll, fetchPaneSelection, openUrlInAside, scrollPane } from "../lib/api.ts";
+import { ApiError, fetchPaneScroll, fetchPaneSelection, localClipboardPaths, openUrlInAside, paneText, scrollPane } from "../lib/api.ts";
 import { parseOsc52 } from "../lib/osc52.ts";
 import { matchHerdrWidths } from "../lib/terminalWidths.ts";
 import { useMachineApi, useMachineId } from "../lib/machineContext.tsx";
@@ -28,12 +28,13 @@ import { ChatView } from "./ChatView.tsx";
 import { RenderBoundary } from "./RenderBoundary.tsx";
 import { Composer } from "./Composer.tsx";
 import type { AgentStatus, ClientRole, ConversationMetadata, InteractivePrompt, ServerMessage } from "../../shared/protocol.ts";
+import { MAX_INSERT_FILES } from "../../shared/insert-files.ts";
 import type { PaneView } from "../lib/actions.ts";
 import { createBionic } from "../lib/bionic.ts";
 import { useSettings, terminalTheme, terminalContrast, type Palette, type ResolvedTheme, type WebLinkTarget } from "../lib/settings.ts";
 import { imeEdit, imeSpaces } from "../lib/imeDiff.ts";
 import {
-  COMPOSITION_IDLE, COMPOSITION_SETTLE_MS, MIRROR_INPUT_IDLE, compositionSettled, filterMirrorInput, flushMirrorInput, type CompositionPhase,
+  COMPOSITION_IDLE, COMPOSITION_SETTLE_MS, MIRROR_INPUT_IDLE, compositionSettled, filterMirrorInput, flushMirrorInput, isTerminalReply, type CompositionPhase,
 } from "../lib/mirrorInputPolicy.ts";
 import { MirrorCompositionBuffer } from "../lib/mirrorCompositionBuffer.ts";
 import { loadFontStack, TERMINAL_FONT_STACK, terminalFontStack } from "../lib/fontFamily.ts";
@@ -44,6 +45,8 @@ import { OpenFileContext } from "../lib/filePaths.ts";
 import { fileUriPath, terminalFileLinkProvider } from "../lib/terminalFileLinks.ts";
 import { adjustTerminalGlyphs } from "../lib/terminalGlyphs.ts";
 import { DELTA_PIXEL, historyOffset, wheelStep } from "../lib/mirrorScroll.ts";
+import { createVelocityTracker, flingStep, startFling } from "../lib/touchFling.ts";
+import { strokeAxis, touchGrid } from "../lib/touchGrid.ts";
 
 /** How long a resize must rest before the grid refits and the pty follows it. */
 const RESIZE_SETTLE_MS = 120;
@@ -129,6 +132,27 @@ function useCoarsePointer(): boolean {
   }, []);
   return coarse;
 }
+
+/**
+ * Fits this browser's own grid to the mount, as the fit addon does, except that a touch screen
+ * held sideways gets TOUCH_LANDSCAPE_COLS (touchGrid.ts): the wider grid overflows the mount,
+ * which pans it (data-wide-grid). Held upright it fits, every edge in sight. Throws where fit()
+ * does, while the mount is not laid out.
+ */
+function fitGrid(fit: FitAddon, term: Terminal, host: HTMLElement | null, touch: boolean): void {
+  const proposed = fit.proposeDimensions();
+  if (!proposed || Number.isNaN(proposed.cols) || Number.isNaN(proposed.rows)) {
+    fit.fit();
+    return;
+  }
+  const grid = touchGrid(proposed, touch && window.matchMedia("(orientation: landscape)").matches);
+  // turned upright again: a pan left over would hide the grid's left columns behind overflow: hidden
+  if (host?.hasAttribute("data-wide-grid") && !grid.wide) host.scrollLeft = 0;
+  host?.toggleAttribute("data-wide-grid", grid.wide);
+  if (!grid.wide) fit.fit();
+  else if (term.cols !== grid.cols || term.rows !== grid.rows) term.resize(grid.cols, grid.rows);
+}
+
 export function PaneTerminal({
   paneId,
   endedAction,
@@ -151,10 +175,16 @@ export function PaneTerminal({
   onServerMessage,
 }: PaneTerminalProps) {
   const t = useT();
+  /** read by the file paste and path insert handlers, whose notes follow the current language */
+  const tRef = useRef(t);
+  tRef.current = t;
   const openFile = useContext(OpenFileContext);
   const openFileRef = useRef(openFile);
   openFileRef.current = openFile;
   const machineId = useMachineId();
+  /** read by the file paste and path insert handlers, which are attached once for the terminal's life */
+  const machineIdRef = useRef(machineId);
+  machineIdRef.current = machineId;
   const { answerPanePrompt, uploadPaneImage } = useMachineApi();
   const uploadFileRef = useRef(uploadPaneImage);
   uploadFileRef.current = uploadPaneImage;
@@ -284,6 +314,8 @@ export function PaneTerminal({
   const historyRef = useRef<MirrorHistory | null>(null);
   // the pty's grid as the server last said it for this pane (pane-geometry), whoever set it
   const sharedGridRef = useRef<{ cols: number; rows: number } | null>(null);
+  // a finger panned a wide grid (fitGrid) across: the view stays there until this browser types again
+  const pannedXRef = useRef(false);
   const [observing, setObserving] = useState(role === "observe");
   const [secret, setSecret] = useState<{ pane: string; prompt: string } | null>(null);
   const secretRef = useRef<string | null>(null);
@@ -304,6 +336,10 @@ export function PaneTerminal({
   const inputLine = !directTyping && !chatView;
   const inputLineRef = useRef(inputLine);
   inputLineRef.current = inputLine;
+  /** the input line's break (TerminalInput), for the key bar's Enter */
+  const lineBreakRef = useRef<(() => void) | null>(null);
+  /** the input line's path insert (TerminalInput), for the header's file picker */
+  const insertPathsRef = useRef<((paths: string[]) => void) | null>(null);
   // input typed while disconnected, held for the user to review and send
   const [draftState, setDraftState] = useState<{ owner: string | null; value: InputDraft }>({ owner: null, value: EMPTY_DRAFT });
   const draft = draftState.value;
@@ -553,6 +589,24 @@ export function PaneTerminal({
       const max = host.scrollHeight - host.clientHeight;
       host.scrollTop = cursorBottom <= host.clientHeight ? 0 : cursorBottom - row >= max ? max : cursorBottom - host.clientHeight;
     };
+    // A touch screen's own grid may be wider than the mount too (fitGrid): the mount pans it
+    // across, and until a finger does, the view keeps the cursor's column in sight with a
+    // couple of cells to spare, at the left edge while the column fits the first screen.
+    const wideGrid = (): boolean => host.hasAttribute("data-wide-grid") && !adopted();
+    const followCursorX = (): void => {
+      const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
+      if (!wideGrid() || pannedXRef.current || !screen) return;
+      const cell = screen.offsetWidth / term.cols;
+      const margin = 2 * cell;
+      // the screen sits inside .xterm's padding
+      const left = screen.offsetLeft + term.buffer.active.cursorX * cell - margin;
+      const right = screen.offsetLeft + (term.buffer.active.cursorX + 1) * cell + margin;
+      const view = host.clientWidth;
+      if (right <= view) host.scrollLeft = 0;
+      else if (left < host.scrollLeft) host.scrollLeft = left;
+      else if (right > host.scrollLeft + view) host.scrollLeft = right - view;
+    };
+    const cursorMove = term.onCursorMove(followCursorX);
 
     /** herdr's text for the last drag, while its highlight is still the selection */
     let copiedText: string | null = null;
@@ -973,7 +1027,7 @@ export function PaneTerminal({
         onRoleAckRef.current?.(message.mode);
         if (!nowObserving && !fixedGridRef.current && !chatViewRef.current) {
           try {
-            fit.fit();
+            fitGrid(fit, term, host, coarseRef.current);
           } catch {
             /* not laid out yet */
           }
@@ -1075,6 +1129,9 @@ export function PaneTerminal({
     const onData = term.onData((data) => {
       const typedKey = data === keyData;
       keyData = null;
+      // typing brings a panned wide grid back to the cursor; xterm's own answers are not typing
+      // (a finger's up-and-down stroke is wheel reports, and must not undo its pan across)
+      if (!isTerminalReply(data)) pannedXRef.current = false;
       data = imeSpaces(data);
       if (shiftEnter && data === "\r") data = "\x1b\r";
       shiftEnter = false;
@@ -1114,37 +1171,68 @@ export function PaneTerminal({
     };
 
     // Browsers expose dropped files as bytes, not local paths. Save them beside
-    // the pane and paste the returned paths; never send Enter with a drop.
-    // Batches upload one after another, so overlapping drops paste their paths in the order dropped.
+    // the pane and paste the returned paths; never send Enter with a file.
+    // Batches resolve one after another, so overlapping drops paste their paths in the order dropped.
+    // The server quotes the paths for the pane's own shell, and refuses one that shell cannot
+    // take safely (a control character, or a cmd.exe metacharacter it cannot escape).
     let fileQueue: Promise<void> = Promise.resolve();
-    const uploadFiles = (files: File[]): void => {
+    const queuePaths = (pane: string, resolve: () => Promise<string[]>): void => {
+      fileQueue = fileQueue.then(async () => {
+        if (paneRef.current !== pane || !socket.connected || term.options.disableStdin) return;
+        try {
+          const text = await paneText(pane, await resolve(), machineIdRef.current);
+          // An upload can finish after the user has switched panes or lost input access.
+          if (paneRef.current !== pane || chatViewRef.current || !socket.connected || term.options.disableStdin) return;
+          term.paste(text);
+          focusTerminal();
+        } catch (error) {
+          if (paneRef.current !== pane) return;
+          if (error instanceof ApiError && error.code === "unsafe_path") noteClipboard(tRef.current("This path cannot be typed into this pane safely"));
+          // a remote PC's bridge from before this route answers it as an unknown endpoint
+          else if (error instanceof ApiError && error.code === "not_found") noteClipboard(tRef.current("This PC's bridge needs an update to insert paths"));
+          else noteClipboard(error instanceof Error ? error.message : String(error));
+        }
+      });
+    };
+    const uploadEach = async (pane: string, files: File[]): Promise<string[]> => {
+      const paths: string[] = [];
+      for (const file of files) paths.push(await uploadFileRef.current(pane, file));
+      return paths;
+    };
+    const insertFiles = (files: File[], fromClipboard: boolean): void => {
       const pane = paneRef.current;
       if (!pane || !socket.connected || term.options.disableStdin) return;
-      fileQueue = fileQueue.then(() => uploadBatch(pane, files));
-    };
-    const uploadBatch = async (pane: string, files: File[]): Promise<void> => {
-      if (paneRef.current !== pane || !socket.connected || term.options.disableStdin) return;
-      try {
-        const paths: string[] = [];
-        for (const file of files) paths.push(await uploadFileRef.current(pane, file));
-        // An upload can finish after the user has switched panes or lost input access.
-        if (paneRef.current !== pane || chatViewRef.current || !socket.connected || term.options.disableStdin) return;
-        term.paste(paths.map((path) => `'${path.replaceAll("'", "'\\''")}'`).join(" ") + " ");
-        focusTerminal();
-      } catch (error) {
-        if (paneRef.current === pane) noteClipboard(error instanceof Error ? error.message : String(error));
-      }
+      // the server takes this many paths at once: say so before anything is uploaded
+      if (files.length > MAX_INSERT_FILES) { noteClipboard(tRef.current("Up to {n} files at a time", { n: MAX_INSERT_FILES })); return; }
+      // A file Explorer copied on this PC already has a path: the server reads it from the
+      // clipboard, now, while the clipboard still holds what was pasted. A drop carries no
+      // path, and a pasted bitmap has none, so those are saved beside the pane.
+      const original = fromClipboard && machineIdRef.current === "local" ? localClipboardPaths(files) : Promise.resolve(null);
+      queuePaths(pane, async () => (await original) ?? (await uploadEach(pane, files)));
     };
     const onFilePaste = (event: ClipboardEvent): void => {
       // xterm handles text (and bracketed paste) itself. A file-only clipboard
-      // needs the upload route instead; copied paths must remain native text.
+      // needs the path or upload route instead; copied paths must remain native text.
       if (event.clipboardData?.getData("text/plain")) return;
       const files = Array.from(event.clipboardData?.files ?? []);
       if (files.length === 0) return;
       event.preventDefault();
       event.stopPropagation();
-      uploadFiles(files);
+      insertFiles(files, true);
     };
+    // The header's file picker names a file by its own path, for the pane it was opened on.
+    const onInsertPaths = (event: Event): void => {
+      const { detail } = event as CustomEvent<{ machine: string; pane: string; paths: string[] }>;
+      const pane = paneRef.current;
+      if (!detail || detail.machine !== machineIdRef.current || !pane || detail.pane !== pane || chatViewRef.current) return;
+      if (!Array.isArray(detail.paths) || detail.paths.length === 0) return;
+      // with the input line, the path joins the line being written there
+      if (inputLineRef.current) { insertPathsRef.current?.(detail.paths); return; }
+      if (!socket.connected || term.options.disableStdin) return;
+      const paths = detail.paths;
+      queuePaths(pane, async () => paths);
+    };
+    window.addEventListener("termweave:insert-paths", onInsertPaths);
     const onDragOver = (event: DragEvent): void => {
       if (!event.dataTransfer) return;
       if (!event.dataTransfer.types.some((type) => type === "Files" || type === "text/plain")) return;
@@ -1156,7 +1244,7 @@ export function PaneTerminal({
       if (!event.dataTransfer || !socket.connected || term.options.disableStdin) return;
       const files = Array.from(event.dataTransfer.files);
       if (files.length > 0) {
-        uploadFiles(files);
+        insertFiles(files, false);
         return;
       }
       const text = event.dataTransfer.getData("text/plain");
@@ -1189,10 +1277,12 @@ export function PaneTerminal({
         // shared pty under another device (#361); the switch back to the terminal refits
         if (chatViewRef.current) return;
         try {
-          fit.fit();
+          fitGrid(fit, term, host, coarseRef.current);
         } catch {
           return;
         }
+        // a phone turned upright may have just made the grid wide, the cursor past the mount's edge
+        followCursorX();
         const current = paneRef.current;
         if (current) socket.resize(current, term.cols, term.rows);
       }, RESIZE_SETTLE_MS);
@@ -1210,27 +1300,29 @@ export function PaneTerminal({
     // An adopted grid sends herdr no wheel (an observer's reports are dropped, a mirror reports
     // nothing): there the drag pans the mount, both ways, to the cells past its edge, and on a
     // mirror a drag the mount cannot follow further up or down scrolls the pane's history.
+    // A touch screen's own grid wider than the mount (fitGrid) pans across instead, while up and
+    // down stay the wheel: each stroke there keeps one axis, taken once the finger has moved
+    // far enough to tell (strokeAxis), and nothing moves before then. The pan lets go of the
+    // cursor (followCursorX) until this browser types again.
+    // A flick that lifts at speed keeps scrolling the same way with decaying speed, as a phone's
+    // own scrolling does, until it slows to a stop, a new touch lands or the pane switches;
+    // on a wide grid only along its stroke's axis. With reduced motion asked for, the text
+    // stops where the finger left it.
     let touchX = 0;
     let touchY = 0;
+    let startX = 0;
+    let startY = 0;
+    /** the axis a stroke on a wide grid keeps, null until it is clear (or on any other grid) */
+    let axis: "x" | "y" | null = null;
     let tracking = false;
-    const onTouchStart = (event: TouchEvent): void => {
-      tracking = event.touches.length === 1;
-      const first = event.touches[0];
-      if (tracking && first) {
-        touchX = first.clientX;
-        touchY = first.clientY;
-      }
+    const touchVelocity = createVelocityTracker();
+    let flingFrame: number | null = null;
+    const stopFling = (): void => {
+      if (flingFrame !== null) window.cancelAnimationFrame(flingFrame);
+      flingFrame = null;
     };
-    const onTouchMove = (event: TouchEvent): void => {
-      if (!tracking || event.touches.length !== 1) return;
-      event.preventDefault();
-      const first = event.touches[0];
-      if (!first) return;
-      // finger moving down (y > touchY) shows older lines: a wheel scrolling up, negative deltaY
-      const delta = touchY - first.clientY;
-      const across = touchX - first.clientX;
-      touchX = first.clientX;
-      touchY = first.clientY;
+    // delta and across are the finger's travel since the last move, up and left positive
+    const moveBy = (across: number, delta: number, x: number, y: number): void => {
       if (adopted()) {
         panned = true;
         const pastEdge = delta !== 0 && mirrorHistory() && !canPan(delta);
@@ -1238,17 +1330,81 @@ export function PaneTerminal({
         if (pastEdge) scrollHistory(delta, DELTA_PIXEL, 1);
         return;
       }
+      if (across !== 0 && wideGrid()) {
+        pannedXRef.current = true;
+        host.scrollLeft += across;
+      }
       if (delta !== 0) {
         const target = term.element ?? host;
-        target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: delta, clientX: first.clientX, clientY: first.clientY }));
+        target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: delta, clientX: x, clientY: y }));
       }
     };
-    const onTouchEnd = (): void => {
+    const onTouchStart = (event: TouchEvent): void => {
+      stopFling();
+      tracking = event.touches.length === 1;
+      axis = null;
+      const first = event.touches[0];
+      if (tracking && first) {
+        touchX = first.clientX;
+        touchY = first.clientY;
+        startX = first.clientX;
+        startY = first.clientY;
+        touchVelocity.reset(event.timeStamp, first.clientX, first.clientY);
+      }
+    };
+    const onTouchMove = (event: TouchEvent): void => {
+      if (!tracking || event.touches.length !== 1) return;
+      event.preventDefault();
+      const first = event.touches[0];
+      if (!first) return;
+      touchVelocity.add(event.timeStamp, first.clientX, first.clientY);
+      if (wideGrid()) {
+        axis ??= strokeAxis(first.clientX - startX, first.clientY - startY);
+        // the travel so far is kept: the locked axis catches up with the finger
+        if (axis === null) return;
+      }
+      // finger moving down (y > touchY) shows older lines: a wheel scrolling up, negative deltaY
+      const delta = touchY - first.clientY;
+      const across = touchX - first.clientX;
+      touchX = first.clientX;
+      touchY = first.clientY;
+      moveBy(axis === "y" ? 0 : across, axis === "x" ? 0 : delta, first.clientX, first.clientY);
+    };
+    const onTouchEnd = (event: TouchEvent): void => {
+      if (!tracking) return;
       tracking = false;
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      // a wide grid's stroke that never took an axis never moved: nothing to continue
+      if (wideGrid() && axis === null) return;
+      const lift = touchVelocity.velocity(event.timeStamp);
+      let velocity = startFling(axis === "x" ? { vx: lift.vx, vy: 0 } : axis === "y" ? { vx: 0, vy: lift.vy } : lift);
+      if (!velocity) return;
+      // the finger's velocity is down and right positive, a move's delta up and left: the fling
+      // continues the drag with the negated travel, at the point the finger lifted
+      const pane = paneRef.current;
+      const x = touchX;
+      const y = touchY;
+      let last = performance.now();
+      const frame = (now: number): void => {
+        flingFrame = null;
+        if (disposed || !velocity || paneRef.current !== pane) return;
+        const step = flingStep(velocity, Math.max(0, now - last));
+        last = Math.max(last, now);
+        velocity = step.v;
+        moveBy(-step.dx, -step.dy, x, y);
+        if (!step.done) flingFrame = window.requestAnimationFrame(frame);
+      };
+      flingFrame = window.requestAnimationFrame(frame);
+    };
+    const onTouchCancel = (): void => {
+      tracking = false;
+      axis = null;
+      stopFling();
     };
     host.addEventListener("touchstart", onTouchStart, { passive: true });
     host.addEventListener("touchmove", onTouchMove, { passive: false });
     host.addEventListener("touchend", onTouchEnd, { passive: true });
+    host.addEventListener("touchcancel", onTouchCancel, { passive: true });
 
     // The pty is shared per pane: a client on another device (typically a phone)
     // resizes it to its own geometry, and this tab's viewport never changed, so
@@ -1259,7 +1415,7 @@ export function PaneTerminal({
       const current = paneRef.current;
       if (!current || observeRef.current || fixedGridRef.current || chatViewRef.current) return;
       try {
-        fit.fit();
+        fitGrid(fit, term, host, coarseRef.current);
       } catch {
         return;
       }
@@ -1279,6 +1435,8 @@ export function PaneTerminal({
       host.removeEventListener("touchstart", onTouchStart);
       host.removeEventListener("touchmove", onTouchMove);
       host.removeEventListener("touchend", onTouchEnd);
+      host.removeEventListener("touchcancel", onTouchCancel);
+      stopFling();
       host.removeEventListener("mousedown", onMouseDown, { capture: true });
       window.removeEventListener("mousemove", onMouseMove, { capture: true });
       window.removeEventListener("blur", onBlur);
@@ -1286,6 +1444,7 @@ export function PaneTerminal({
       host.removeEventListener("copy", onCopy);
       stopEdge();
       selectionChange.dispose();
+      cursorMove.dispose();
       window.removeEventListener("focus", refit);
       document.removeEventListener("visibilitychange", onVisible);
       onShiftEnter.dispose();
@@ -1294,6 +1453,7 @@ export function PaneTerminal({
       onMirrorKey.dispose();
       settleComposition(false);
       host.removeEventListener("paste", onFilePaste, { capture: true });
+      window.removeEventListener("termweave:insert-paths", onInsertPaths);
       host.removeEventListener("dragover", onDragOver);
       host.removeEventListener("drop", onDrop);
       offDisconnect();
@@ -1343,8 +1503,9 @@ export function PaneTerminal({
       term.options.lineHeight = terminalLineHeight;
       term.refresh(0, term.rows - 1);
       if (observeRef.current || fixedGridRef.current || chatViewRef.current) return;
+      const fit = fitRef.current;
       try {
-        fitRef.current?.fit();
+        if (fit) fitGrid(fit, term, hostRef.current, coarseRef.current);
       } catch {
         return;
       }
@@ -1369,8 +1530,9 @@ export function PaneTerminal({
     }
     if (observeRef.current || fixedGridRef.current) return;
     const term = termRef.current;
+    const fit = fitRef.current;
     try {
-      fitRef.current?.fit();
+      if (fit && term) fitGrid(fit, term, hostRef.current, coarseRef.current);
     } catch {
       return;
     }
@@ -1402,6 +1564,9 @@ export function PaneTerminal({
     sharedGridRef.current = null;
     // the next pane's grid is this browser's again unless it says otherwise (pane-geometry)
     hostRef.current?.toggleAttribute("data-adopted-grid", observeRef.current);
+    // and a wide grid starts at its left edge, following the next pane's cursor
+    pannedXRef.current = false;
+    if (hostRef.current) hostRef.current.scrollLeft = 0;
     secretRef.current = null;
     setSecret(null);
     // a key-bar Ctrl armed on the previous pane must not turn the next pane's first key into ^C
@@ -1418,7 +1583,7 @@ export function PaneTerminal({
     term.reset();
     if (!paneId) return;
     try {
-      fit?.fit();
+      if (fit) fitGrid(fit, term, hostRef.current, coarseRef.current);
     } catch {
       /* not laid out yet; the ResizeObserver will follow up */
     }
@@ -1443,6 +1608,12 @@ export function PaneTerminal({
 
   // key-bar taps go through xterm so the onData -> socket path above is reused
   const pressKey = useCallback((key: KeyBarKey) => {
+    // with the input line, Enter breaks its line (a keyboard such as Samsung's Cheonjiin has no
+    // Enter of its own): the line's send button sends it. It commits an open syllable first.
+    if (key === "Enter" && inputLineRef.current && lineBreakRef.current) {
+      lineBreakRef.current();
+      return;
+    }
     const term = termRef.current;
     if (!term) return;
     if (composingRef.current) return;
@@ -1515,6 +1686,8 @@ export function PaneTerminal({
     const sent = socket.submit(pane, message, payload, true);
     if (sent === null) return false;
     term.scrollToBottom();
+    // typed here rather than into the grid: a panned wide grid comes back to the cursor all the same
+    pannedXRef.current = false;
     return sent.then((result) => (result.ok ? true : submitNote(result.code, result.message)));
   }, []);
 
@@ -1524,6 +1697,7 @@ export function PaneTerminal({
     if (!socket || pane === null || !socket.connected) return false;
     const sent = socket.sendInput(pane, "\r");
     termRef.current?.scrollToBottom();
+    pannedXRef.current = false;
     return sent;
   }, []);
 
@@ -1811,8 +1985,8 @@ export function PaneTerminal({
           onUploadImage={uploadImage}
         />
       )}
-      {paneId !== null && !secretActive && !observing && !ended && inputLine && <TerminalInput key={paneId} owner={paneStorageId(machineId, paneId)} paneId={paneId} onComposing={setComposing} connected={connected && !held} onSend={sendTerminalLine} onEnter={pressEnter} />}
-      {paneId !== null && !secretActive && !observing && !chatView && <KeyBar disabled={composing} onKey={pressKey} ctrlArmed={ctrlArmed} onToggleCtrl={toggleCtrl}
+      {paneId !== null && !secretActive && !observing && !ended && inputLine && <TerminalInput key={paneId} owner={paneStorageId(machineId, paneId)} paneId={paneId} onComposing={setComposing} connected={connected && !held} onSend={sendTerminalLine} onEnter={pressEnter} lineBreakRef={lineBreakRef} insertPathsRef={insertPathsRef} />}
+      {paneId !== null && !secretActive && !observing && !chatView && <KeyBar disabled={composing} enterDisabled={composing && !inputLine} onKey={pressKey} ctrlArmed={ctrlArmed} onToggleCtrl={toggleCtrl}
         {...(coarse ? { directTyping, onToggleDirect: toggleDirect } : {})} />}
     </div>
   );

@@ -50,6 +50,12 @@
     border-color var(--dur-fast) var(--ease-out);
 }
 
+/* Enter sits at the right end of the row, where the thumb finds it */
+.key[data-key="Enter"] {
+  margin-left: auto;
+  padding: 0 var(--space-2);
+}
+
 .key svg {
   width: var(--icon-size);
   height: var(--icon-size);

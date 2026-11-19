@@ -10,6 +10,8 @@ export type { KeyBarKey };
 
 export interface KeyBarProps {
   disabled?: boolean;
+  /** Enter's own state: with the input line it commits an open syllable itself, so composing does not disable it */
+  enterDisabled?: boolean;
   /** Fires for every key except Control, which toggles the one-shot modifier instead. */
   onKey: (key: KeyBarKey) => void;
   ctrlArmed: boolean;
@@ -84,7 +86,7 @@ export const ARROWS: ReadonlyArray<{ key: KeyBarKey; label: string; direction: D
  * for touch, a hardware keyboard already has all of them. Hence role="group", not
  * toolbar: a toolbar promises arrow-key navigation between items, which these skip.
  */
-export function KeyBar({ onKey, ctrlArmed, onToggleCtrl, directTyping, onToggleDirect, disabled }: KeyBarProps) {
+export function KeyBar({ onKey, ctrlArmed, onToggleCtrl, directTyping, onToggleDirect, disabled, enterDisabled = disabled }: KeyBarProps) {
   const t = useT();
   return (
     <div className="key-bar" role="group" aria-label={t("Terminal keys")}>
@@ -110,6 +112,12 @@ export function KeyBar({ onKey, ctrlArmed, onToggleCtrl, directTyping, onToggleD
       ))}
       <Key disabled={disabled} dataKey="ctrl-c" label={t("Control C")} onPress={() => onKey("ctrl-c")}>
         ^C
+      </Key>
+      {/* last, at the right end where a keyboard's Enter sits: a soft keyboard may have none
+          (Samsung's Cheonjiin). With the input line it breaks the line; typing straight into
+          the terminal it is the terminal's Enter */}
+      <Key disabled={enterDisabled} dataKey="Enter" label={t("Enter")} onPress={() => onKey("Enter")}>
+        Enter
       </Key>
     </div>
   );

@@ -1113,7 +1113,8 @@ button {
 
 /* ---------- mobile: sidebar becomes a drawer ---------- */
 
-@media (max-width: 768px) {
+/* narrow screens, and a phone turned sideways (wide but short); PHONE_DRAWER_QUERY in lib/phoneLayout.ts */
+@media (max-width: 768px), (pointer: coarse) and (max-height: 500px) {
   .drawer-toggle {
     display: inline-flex;
   }
@@ -1213,9 +1214,11 @@ button {
   }
 }
 
-/* a narrow phone header has no room for it: the command palette offers Browse files */
+/* a narrow phone header has no room for them: the command palette offers Browse files and
+   Insert file path, and the input line has its own attach button */
 @media (max-width: 480px) {
-  .files-button { display: none; }
+  .files-button,
+  .insert-path-button { display: none; }
 }
 
 /* Keep native tap overlays from obscuring the app's own pressed/selected states. */
@@ -1242,8 +1245,8 @@ button, a, [role="button"] {
 :root .dock-tab-actions { flex: 0 0 auto; flex-wrap: nowrap; }
 :root .dock-tab-actions .dock-add, :root .dock-tab-actions .dock-delete { font-size: 0; gap: 0; padding-inline: 8px; }
 
-/* phones: each bar is also shorter */
-@media (max-width: 640px) {
+/* phones, and a phone turned sideways (wide but short): each bar is also shorter */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   :root .dock-tabs { flex-wrap: nowrap; }
   :root .dock-tab-strip { flex: 1 1 auto; height: 36px; }
   :root .dock-tab-strip button { height: 30px; min-height: 30px; }
@@ -1260,11 +1263,30 @@ button, a, [role="button"] {
   :root .key { height: 30px; min-width: 34px; }
 }
 
+/* a phone turned sideways has a third of its upright height: every bar above the terminal
+   shrinks to one short row, and the terminal picker row goes (the drawer lists every terminal,
+   the tab strip this workspace's). With the keyboard up the header and tab strip go too: the
+   terminal, its input line and the key bar are all that fit. Orientation as well as height, so
+   a phone held upright with its keyboard up (short too) keeps its own layout. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  :root { --header-h: 40px; }
+  :root .context-sub { display: none; }
+  :root .split-workspace > .dock-existing,
+  :root .split-workspace > .browser-preview:not(:has(.browser-preview-body)) { display: none; }
+  :root .dock-tab-strip { height: 32px; }
+  :root .dock-tab-strip button { height: 28px; min-height: 28px; }
+  :root .dock-tab-actions button { min-height: 30px; min-width: 30px; }
+  :root .key-bar { height: calc(30px + env(safe-area-inset-bottom, 0px)); }
+  :root .key { height: 26px; }
+  :root[data-keyboard] .app-header,
+  :root[data-keyboard] .dock-tabs { display: none; }
+}
+
 /* the header's "more" button: desktop keeps the row, phones fold the tools into a dropdown */
 .header-more-wrap { display: contents; }
 .header-more { display: none; position: relative; margin-left: auto; }
 .header-more-dot { position: absolute; top: 4px; right: 4px; display: flex; }
-@media (max-width: 640px) {
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   .header-more-wrap { display: block; margin-left: auto; }
   .header-more { display: inline-flex; }
   :root .app-header:has(.frontend-controls) { flex-wrap: nowrap; }

@@ -205,6 +205,7 @@ export const ZH: Record<string, string> = {
   "reconnecting": "正在重连",
   "herdr offline": "herdr 离线",
   "Browse files": "浏览文件",
+  "Insert file path": "插入文件路径",
   "Sign out": "退出登录",
   "Retry": "重试",
   "Enable notifications": "开启通知",
@@ -351,6 +352,7 @@ export const ZH: Record<string, string> = {
   "Choose a folder": "选择文件夹",
   "Parent folder": "上级文件夹",
   "Home folder": "主文件夹",
+  "Drives": "此电脑",
   "Nothing here": "此处为空",
   "No folders here": "此处没有文件夹",
   "Showing the first {n} folders; type the rest of the path to go further.": "仅显示前 {n} 个文件夹。输入其余路径以继续深入。",
@@ -431,6 +433,7 @@ export const ZH: Record<string, string> = {
   "Left": "左",
   "Right": "右",
   "Control C": "Control C",
+  "Enter": "回车",
 
   // ---- prompt card ----
   "Submit": "提交",
@@ -561,6 +564,10 @@ export const ZH: Record<string, string> = {
 
   // ---- voice input ----
   "Without a key the browser recognizes the speech: Chrome and Edge send the audio to Google or Microsoft. Nothing is recorded until you press the mic.": "没有密钥时由浏览器识别语音：Chrome 和 Edge 会把音频发送给 Google 或 Microsoft。按下麦克风前不会录音。",
+  "The path does not fit in the box": "路径超出输入框上限，未插入",
+  "This path cannot be typed into this pane safely": "此路径无法安全地输入到此窗格",
+  "Up to {n} files at a time": "一次最多插入 {n} 个文件",
+  "This PC's bridge needs an update to insert paths": "需要更新此电脑的桥接程序才能插入路径",
   "The dictation does not fit in the box": "听写内容超出输入框上限，未插入",
   "No speech was heard": "没有听到语音",
   "Drops fillers and fixes spacing; code and paths stay as spoken": "去掉口头禅并修正空格；代码和路径保持原样",
