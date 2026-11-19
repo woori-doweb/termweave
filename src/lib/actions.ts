@@ -33,4 +33,6 @@ export interface AppActions {
   swapPanes: (request: PaneSwapRequest, workspaceId: string, machineId: string) => Promise<void>;
   /** null without a pane: the files of its folder, each opened in the file viewer */
   openFiles: (() => void) | null;
+  /** null without a pane or in the chat lens: picks a file of its PC, whose path is typed into the pane's input */
+  insertPath: (() => void) | null;
 }

@@ -1,7 +1,7 @@
 import { paneNumber } from "../lib/paneNumber.ts";
 import { useMachineId } from "../lib/machineContext.tsx";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
-import { Bell, FolderOpen, LockKeyhole, MessageSquarePlus, Monitor, PanelLeft, RefreshCw, Settings, SunMoon, SwitchCamera, X } from "lucide-react";
+import { Bell, FolderOpen, LockKeyhole, MessageSquarePlus, Monitor, PanelLeft, Paperclip, RefreshCw, Settings, SunMoon, SwitchCamera, X } from "lucide-react";
 
 import "./CommandPalette.css";
 
@@ -111,6 +111,7 @@ export function CommandPalette({ open, onClose, snapshot, selectedPaneId, view, 
     ...(actions.enableNotifications ? [{ id: "notifications", label: t("Enable notifications"), icon: Bell, run: actions.enableNotifications }] : []),
     ...(actions.lock ? [{ id: "lock", label: t("Sign out"), icon: LockKeyhole, run: actions.lock }] : []),
     ...(actions.openFiles ? [{ id: "files", label: t("Browse files"), icon: FolderOpen, run: actions.openFiles }] : []),
+    ...(actions.insertPath ? [{ id: "insert-path", label: t("Insert file path"), icon: Paperclip, run: actions.insertPath }] : []),
     { id: "refresh", label: t("Refresh"), icon: RefreshCw, run: actions.refresh },
   ], [actions, view, t]);
 

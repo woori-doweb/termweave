@@ -17,6 +17,8 @@ import type { AgentKind, AgentStatus, ClientMessage, ClientRole, HealthAuth, Her
 import { paneTitle } from "../shared/notify-policy.ts";
 import { DEFAULT_PORT } from "../shared/protocol.ts";
 import { asideExecutable, openInAside, OpenUrlError, parseOpenUrl } from "./open-url.ts";
+import { clipboardFilePaths, validClipboardRequest } from "./local-clipboard.ts";
+import { paneShellOf, shellText, UnsafePathError, validPaths } from "./path-text.ts";
 import { DEVICE_COOKIE, handleAuthRequest, isAuthenticated, parseCookies, requiresAuth, unauthorizedJson } from "./auth.ts";
 import { cameThroughProxy, decideAccess, isLoopbackAddress } from "./access.ts";
 import { DeviceStore, handleDeviceRequest } from "./devices.ts";
@@ -1298,6 +1300,22 @@ export function createServer(
         return new Response(null, { status: 204 });
       }
 
+      // A file pasted from Explorer: the original path, read from this PC's clipboard. Only a
+      // request from this PC itself, never through a proxy: the clipboard is the person's at the
+      // keyboard here, not a remote device's.
+      if (pathname === "/api/local/clipboard-files") {
+        if (request.method !== "POST") return badRequest("method_not_allowed", "use POST");
+        // the device routes' mutation guard: same origin (checked above) plus the app's own header
+        if (request.headers.get("x-herdr-machine") !== "1") return jsonResponse({ error: { code: "invalid_origin", message: "Paste files from this app" } }, 403);
+        const local = ip !== null && isLoopbackAddress(ip.address) && !cameThroughProxy(request.headers);
+        if (!local) return jsonResponse({ error: { code: "local_only", message: "only this PC itself can read its clipboard" } }, 403);
+        let files: ReturnType<typeof validClipboardRequest> = null;
+        // 64 KB holds twenty 255-character names even with every character JSON-escaped
+        try { files = validClipboardRequest(await boundedJson(request, 64 * 1024)); } catch { /* an unreadable body is refused like an invalid one */ }
+        if (files === null) return badRequest("invalid_files", "files must be 1 to 20 entries of { name, size }");
+        return jsonResponse({ paths: await clipboardFilePaths(files) }, 200, { "cache-control": "no-store" });
+      }
+
       if (pathname.startsWith("/api/panes/by-number/")) {
         if (request.method !== "GET") return badRequest("method_not_allowed", "use GET");
         const number = pathname.slice("/api/panes/by-number/".length);
@@ -1887,6 +1905,28 @@ export function createServer(
           if (error instanceof PasteImageError) {
             return jsonResponse({ error: { code: error.code, message: error.message } }, error.status);
           }
+          return errorResponse(error);
+        }
+      }
+
+      // The text that inserts picked or dropped files' paths, quoted here because only this
+      // server can ask herdr which shell the pane runs.
+      if (pathname === "/api/pane/path-text") {
+        if (request.method !== "POST") return badRequest("method_not_allowed", "use POST");
+        let payload: { pane_id?: string; paths?: unknown };
+        try {
+          payload = (await request.json()) as typeof payload;
+        } catch {
+          return badRequest("invalid_json", "request body must be JSON");
+        }
+        if (!isJsonObject(payload)) return badRequest("invalid_body", "request body must be a JSON object");
+        if (typeof payload.pane_id !== "string" || !payload.pane_id.trim()) return badRequest("missing_pane_id", "pane_id is required");
+        const paths = validPaths(payload.paths);
+        if (paths === null) return badRequest("invalid_paths", "paths must be 1 to 20 non-empty strings of at most 4096 characters");
+        try {
+          return jsonResponse({ text: shellText(await paneShellOf(payload.pane_id), paths) });
+        } catch (error) {
+          if (error instanceof UnsafePathError) return badRequest(error.code, error.message);
           return errorResponse(error);
         }
       }

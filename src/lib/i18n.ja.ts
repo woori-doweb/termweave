@@ -203,6 +203,7 @@ export const JA: Record<string, string> = {
   "reconnecting": "再接続中",
   "herdr offline": "herdr オフライン",
   "Browse files": "ファイルを参照",
+  "Insert file path": "ファイルパスを挿入",
   "Sign out": "サインアウト",
   "Retry": "再試行",
   "Enable notifications": "通知を有効にする",
@@ -558,6 +559,10 @@ export const JA: Record<string, string> = {
 
   // ---- voice input ----
   "Without a key the browser recognizes the speech: Chrome and Edge send the audio to Google or Microsoft. Nothing is recorded until you press the mic.": "キーがない場合はブラウザが音声を認識します。Chrome と Edge は音声を Google または Microsoft に送信します。マイクを押すまで録音されません。",
+  "The path does not fit in the box": "パスが入力欄の上限を超えるため挿入しませんでした",
+  "This path cannot be typed into this pane safely": "このパスはこのペインに安全に入力できません",
+  "Up to {n} files at a time": "一度に入れられるファイルは {n} 個までです",
+  "This PC's bridge needs an update to insert paths": "パスを挿入するには、この PC のブリッジを更新してください",
   "The dictation does not fit in the box": "音声入力の内容が入力欄の上限を超えるため挿入しませんでした",
   "No speech was heard": "音声が聞こえませんでした",
   "Drops fillers and fixes spacing; code and paths stay as spoken": "言いよどみを除き、スペースを整えます。コードとパスはそのまま残します",
