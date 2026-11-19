@@ -1261,6 +1261,25 @@ button, a, [role="button"] {
   :root .key { height: 30px; min-width: 34px; }
 }
 
+/* a phone turned sideways has a third of its upright height: every bar above the terminal
+   shrinks to one short row, and the terminal picker row goes (the drawer lists every terminal,
+   the tab strip this workspace's). With the keyboard up the header and tab strip go too: the
+   terminal, its input line and the key bar are all that fit. Orientation as well as height, so
+   a phone held upright with its keyboard up (short too) keeps its own layout. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 500px) {
+  :root { --header-h: 40px; }
+  :root .context-sub { display: none; }
+  :root .split-workspace > .dock-existing,
+  :root .split-workspace > .browser-preview:not(:has(.browser-preview-body)) { display: none; }
+  :root .dock-tab-strip { height: 32px; }
+  :root .dock-tab-strip button { height: 28px; min-height: 28px; }
+  :root .dock-tab-actions button { min-height: 30px; min-width: 30px; }
+  :root .key-bar { height: calc(30px + env(safe-area-inset-bottom, 0px)); }
+  :root .key { height: 26px; }
+  :root[data-keyboard] .app-header,
+  :root[data-keyboard] .dock-tabs { display: none; }
+}
+
 /* the header's "more" button: desktop keeps the row, phones fold the tools into a dropdown */
 .header-more-wrap { display: contents; }
 .header-more { display: none; position: relative; margin-left: auto; }
