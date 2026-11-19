@@ -153,8 +153,9 @@ try {
   console.log("PASS in a small desktop window the wheel pans a mirrored grid");
   await narrow.close();
 
-  // A herdr that attaches: an interact client's grid is its own and fits, so nothing pans and a
-  // vertical drag still scrolls herdr's history. An observer adopts the operator's grid and pans it.
+  // A herdr that attaches: an interact client's grid is its own. On a phone it is widened to
+  // TOUCH_MIN_COLS and pans sideways; a vertical drag still scrolls herdr's history and pans nothing.
+  // An observer adopts the operator's grid and pans it.
   const second = await workspaceCreate({ cwd, label: "herdr-web-ui-test-winlens-attach" });
   workspaces.push(second.workspace.workspace_id);
   const attached = second.root_pane.pane_id;
@@ -170,12 +171,17 @@ try {
   await line.press("Enter");
   await until(async () => (await screen(mine)).includes("hist-200"), "the attached pane's output");
   const fitted = await scrollOf(mine);
-  assert.deepEqual([fitted.adopted, fitted.width, fitted.height], [false, 0, 0], "a grid of this browser's own fits: nothing to pan");
-  assert.equal(await mine.locator(".pane-terminal").evaluate((host) => getComputedStyle(host).overflow), "hidden");
+  assert.equal(fitted.adopted, false, "the grid is this browser's own");
+  assert.equal(fitted.height, 0, "its rows fit the mount");
+  assert.ok(fitted.width > 0, "a phone's own grid is wider than the mount (TOUCH_MIN_COLS): it pans sideways");
+  assert.deepEqual(await mine.locator(".pane-terminal").evaluate((host) => [host.hasAttribute("data-wide-grid"), getComputedStyle(host).overflowX, getComputedStyle(host).overflowY]), [true, "auto", "hidden"]);
   await dragUntil(mine, 0, 300, async () => !(await screen(mine)).includes("hist-200"), "a drag down still scrolls herdr's history");
-  assert.deepEqual(await scrollOf(mine), fitted, "and pans nothing");
+  assert.equal((await scrollOf(mine)).left, fitted.left, "and pans nothing sideways");
+  await mine.evaluate(() => { document.querySelector(".pane-terminal")!.scrollLeft = 0; });
+  await drag(mine, -200, 0);
+  assert.ok((await scrollOf(mine)).left > 0, "a drag to the left pans the wide grid");
   if (evidence) await mine.screenshot({ path: join(evidence, "attach-phone-history.png") });
-  console.log("PASS a phone's own grid fits as before, and a drag scrolls herdr's history");
+  console.log("PASS a phone's own grid is widened and pans sideways, and a vertical drag scrolls herdr's history");
   await own.close();
 
   const operator = await context.newPage();

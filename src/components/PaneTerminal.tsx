@@ -33,7 +33,7 @@ import { createBionic } from "../lib/bionic.ts";
 import { useSettings, terminalTheme, terminalContrast, type Palette, type ResolvedTheme, type WebLinkTarget } from "../lib/settings.ts";
 import { imeEdit, imeSpaces } from "../lib/imeDiff.ts";
 import {
-  COMPOSITION_IDLE, COMPOSITION_SETTLE_MS, MIRROR_INPUT_IDLE, compositionSettled, filterMirrorInput, flushMirrorInput, type CompositionPhase,
+  COMPOSITION_IDLE, COMPOSITION_SETTLE_MS, MIRROR_INPUT_IDLE, compositionSettled, filterMirrorInput, flushMirrorInput, isTerminalReply, type CompositionPhase,
 } from "../lib/mirrorInputPolicy.ts";
 import { MirrorCompositionBuffer } from "../lib/mirrorCompositionBuffer.ts";
 import { loadFontStack, TERMINAL_FONT_STACK, terminalFontStack } from "../lib/fontFamily.ts";
@@ -45,6 +45,7 @@ import { fileUriPath, terminalFileLinkProvider } from "../lib/terminalFileLinks.
 import { adjustTerminalGlyphs } from "../lib/terminalGlyphs.ts";
 import { DELTA_PIXEL, historyOffset, wheelStep } from "../lib/mirrorScroll.ts";
 import { createVelocityTracker, flingStep, startFling } from "../lib/touchFling.ts";
+import { strokeAxis, touchGrid } from "../lib/touchGrid.ts";
 
 /** How long a resize must rest before the grid refits and the pty follows it. */
 const RESIZE_SETTLE_MS = 120;
@@ -130,6 +131,24 @@ function useCoarsePointer(): boolean {
   }, []);
   return coarse;
 }
+
+/**
+ * Fits this browser's own grid to the mount, as the fit addon does, except that a touch screen's
+ * grid is never narrower than TOUCH_MIN_COLS (touchGrid.ts): a wider grid overflows the mount,
+ * which pans it (data-wide-grid). Throws where fit() does, while the mount is not laid out.
+ */
+function fitGrid(fit: FitAddon, term: Terminal, host: HTMLElement | null, touch: boolean): void {
+  const proposed = fit.proposeDimensions();
+  if (!proposed || Number.isNaN(proposed.cols) || Number.isNaN(proposed.rows)) {
+    fit.fit();
+    return;
+  }
+  const grid = touchGrid(proposed, touch);
+  host?.toggleAttribute("data-wide-grid", grid.wide);
+  if (!grid.wide) fit.fit();
+  else if (term.cols !== grid.cols || term.rows !== grid.rows) term.resize(grid.cols, grid.rows);
+}
+
 export function PaneTerminal({
   paneId,
   endedAction,
@@ -285,6 +304,8 @@ export function PaneTerminal({
   const historyRef = useRef<MirrorHistory | null>(null);
   // the pty's grid as the server last said it for this pane (pane-geometry), whoever set it
   const sharedGridRef = useRef<{ cols: number; rows: number } | null>(null);
+  // a finger panned a wide grid (fitGrid) across: the view stays there until this browser types again
+  const pannedXRef = useRef(false);
   const [observing, setObserving] = useState(role === "observe");
   const [secret, setSecret] = useState<{ pane: string; prompt: string } | null>(null);
   const secretRef = useRef<string | null>(null);
@@ -554,6 +575,24 @@ export function PaneTerminal({
       const max = host.scrollHeight - host.clientHeight;
       host.scrollTop = cursorBottom <= host.clientHeight ? 0 : cursorBottom - row >= max ? max : cursorBottom - host.clientHeight;
     };
+    // A touch screen's own grid may be wider than the mount too (fitGrid): the mount pans it
+    // across, and until a finger does, the view keeps the cursor's column in sight with a
+    // couple of cells to spare, at the left edge while the column fits the first screen.
+    const wideGrid = (): boolean => host.hasAttribute("data-wide-grid") && !adopted();
+    const followCursorX = (): void => {
+      const screen = term.element?.querySelector<HTMLElement>(".xterm-screen");
+      if (!wideGrid() || pannedXRef.current || !screen) return;
+      const cell = screen.offsetWidth / term.cols;
+      const margin = 2 * cell;
+      // the screen sits inside .xterm's padding
+      const left = screen.offsetLeft + term.buffer.active.cursorX * cell - margin;
+      const right = screen.offsetLeft + (term.buffer.active.cursorX + 1) * cell + margin;
+      const view = host.clientWidth;
+      if (right <= view) host.scrollLeft = 0;
+      else if (left < host.scrollLeft) host.scrollLeft = left;
+      else if (right > host.scrollLeft + view) host.scrollLeft = right - view;
+    };
+    const cursorMove = term.onCursorMove(followCursorX);
 
     /** herdr's text for the last drag, while its highlight is still the selection */
     let copiedText: string | null = null;
@@ -974,7 +1013,7 @@ export function PaneTerminal({
         onRoleAckRef.current?.(message.mode);
         if (!nowObserving && !fixedGridRef.current && !chatViewRef.current) {
           try {
-            fit.fit();
+            fitGrid(fit, term, host, coarseRef.current);
           } catch {
             /* not laid out yet */
           }
@@ -1076,6 +1115,9 @@ export function PaneTerminal({
     const onData = term.onData((data) => {
       const typedKey = data === keyData;
       keyData = null;
+      // typing brings a panned wide grid back to the cursor; xterm's own answers are not typing
+      // (a finger's up-and-down stroke is wheel reports, and must not undo its pan across)
+      if (!isTerminalReply(data)) pannedXRef.current = false;
       data = imeSpaces(data);
       if (shiftEnter && data === "\r") data = "\x1b\r";
       shiftEnter = false;
@@ -1190,10 +1232,12 @@ export function PaneTerminal({
         // shared pty under another device (#361); the switch back to the terminal refits
         if (chatViewRef.current) return;
         try {
-          fit.fit();
+          fitGrid(fit, term, host, coarseRef.current);
         } catch {
           return;
         }
+        // a phone turned upright may have just made the grid wide, the cursor past the mount's edge
+        followCursorX();
         const current = paneRef.current;
         if (current) socket.resize(current, term.cols, term.rows);
       }, RESIZE_SETTLE_MS);
@@ -1211,11 +1255,20 @@ export function PaneTerminal({
     // An adopted grid sends herdr no wheel (an observer's reports are dropped, a mirror reports
     // nothing): there the drag pans the mount, both ways, to the cells past its edge, and on a
     // mirror a drag the mount cannot follow further up or down scrolls the pane's history.
+    // A touch screen's own grid wider than the mount (fitGrid) pans across instead, while up and
+    // down stay the wheel: each stroke there keeps one axis, taken once the finger has moved
+    // far enough to tell (strokeAxis), and nothing moves before then. The pan lets go of the
+    // cursor (followCursorX) until this browser types again.
     // A flick that lifts at speed keeps scrolling the same way with decaying speed, as a phone's
     // own scrolling does, until it slows to a stop, a new touch lands or the pane switches;
-    // with reduced motion asked for, the text stops where the finger left it.
+    // on a wide grid only along its stroke's axis. With reduced motion asked for, the text
+    // stops where the finger left it.
     let touchX = 0;
     let touchY = 0;
+    let startX = 0;
+    let startY = 0;
+    /** the axis a stroke on a wide grid keeps, null until it is clear (or on any other grid) */
+    let axis: "x" | "y" | null = null;
     let tracking = false;
     const touchVelocity = createVelocityTracker();
     let flingFrame: number | null = null;
@@ -1232,6 +1285,10 @@ export function PaneTerminal({
         if (pastEdge) scrollHistory(delta, DELTA_PIXEL, 1);
         return;
       }
+      if (across !== 0 && wideGrid()) {
+        pannedXRef.current = true;
+        host.scrollLeft += across;
+      }
       if (delta !== 0) {
         const target = term.element ?? host;
         target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: delta, clientX: x, clientY: y }));
@@ -1240,10 +1297,13 @@ export function PaneTerminal({
     const onTouchStart = (event: TouchEvent): void => {
       stopFling();
       tracking = event.touches.length === 1;
+      axis = null;
       const first = event.touches[0];
       if (tracking && first) {
         touchX = first.clientX;
         touchY = first.clientY;
+        startX = first.clientX;
+        startY = first.clientY;
         touchVelocity.reset(event.timeStamp, first.clientX, first.clientY);
       }
     };
@@ -1252,19 +1312,27 @@ export function PaneTerminal({
       event.preventDefault();
       const first = event.touches[0];
       if (!first) return;
+      touchVelocity.add(event.timeStamp, first.clientX, first.clientY);
+      if (wideGrid()) {
+        axis ??= strokeAxis(first.clientX - startX, first.clientY - startY);
+        // the travel so far is kept: the locked axis catches up with the finger
+        if (axis === null) return;
+      }
       // finger moving down (y > touchY) shows older lines: a wheel scrolling up, negative deltaY
       const delta = touchY - first.clientY;
       const across = touchX - first.clientX;
       touchX = first.clientX;
       touchY = first.clientY;
-      touchVelocity.add(event.timeStamp, first.clientX, first.clientY);
-      moveBy(across, delta, first.clientX, first.clientY);
+      moveBy(axis === "y" ? 0 : across, axis === "x" ? 0 : delta, first.clientX, first.clientY);
     };
     const onTouchEnd = (event: TouchEvent): void => {
       if (!tracking) return;
       tracking = false;
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-      let velocity = startFling(touchVelocity.velocity(event.timeStamp));
+      // a wide grid's stroke that never took an axis never moved: nothing to continue
+      if (wideGrid() && axis === null) return;
+      const lift = touchVelocity.velocity(event.timeStamp);
+      let velocity = startFling(axis === "x" ? { vx: lift.vx, vy: 0 } : axis === "y" ? { vx: 0, vy: lift.vy } : lift);
       if (!velocity) return;
       // the finger's velocity is down and right positive, a move's delta up and left: the fling
       // continues the drag with the negated travel, at the point the finger lifted
@@ -1285,6 +1353,7 @@ export function PaneTerminal({
     };
     const onTouchCancel = (): void => {
       tracking = false;
+      axis = null;
       stopFling();
     };
     host.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -1301,7 +1370,7 @@ export function PaneTerminal({
       const current = paneRef.current;
       if (!current || observeRef.current || fixedGridRef.current || chatViewRef.current) return;
       try {
-        fit.fit();
+        fitGrid(fit, term, host, coarseRef.current);
       } catch {
         return;
       }
@@ -1330,6 +1399,7 @@ export function PaneTerminal({
       host.removeEventListener("copy", onCopy);
       stopEdge();
       selectionChange.dispose();
+      cursorMove.dispose();
       window.removeEventListener("focus", refit);
       document.removeEventListener("visibilitychange", onVisible);
       onShiftEnter.dispose();
@@ -1387,8 +1457,9 @@ export function PaneTerminal({
       term.options.lineHeight = terminalLineHeight;
       term.refresh(0, term.rows - 1);
       if (observeRef.current || fixedGridRef.current || chatViewRef.current) return;
+      const fit = fitRef.current;
       try {
-        fitRef.current?.fit();
+        if (fit) fitGrid(fit, term, hostRef.current, coarseRef.current);
       } catch {
         return;
       }
@@ -1413,8 +1484,9 @@ export function PaneTerminal({
     }
     if (observeRef.current || fixedGridRef.current) return;
     const term = termRef.current;
+    const fit = fitRef.current;
     try {
-      fitRef.current?.fit();
+      if (fit && term) fitGrid(fit, term, hostRef.current, coarseRef.current);
     } catch {
       return;
     }
@@ -1446,6 +1518,9 @@ export function PaneTerminal({
     sharedGridRef.current = null;
     // the next pane's grid is this browser's again unless it says otherwise (pane-geometry)
     hostRef.current?.toggleAttribute("data-adopted-grid", observeRef.current);
+    // and a wide grid starts at its left edge, following the next pane's cursor
+    pannedXRef.current = false;
+    if (hostRef.current) hostRef.current.scrollLeft = 0;
     secretRef.current = null;
     setSecret(null);
     // a key-bar Ctrl armed on the previous pane must not turn the next pane's first key into ^C
@@ -1462,7 +1537,7 @@ export function PaneTerminal({
     term.reset();
     if (!paneId) return;
     try {
-      fit?.fit();
+      if (fit) fitGrid(fit, term, hostRef.current, coarseRef.current);
     } catch {
       /* not laid out yet; the ResizeObserver will follow up */
     }
@@ -1559,6 +1634,8 @@ export function PaneTerminal({
     const sent = socket.submit(pane, message, payload, true);
     if (sent === null) return false;
     term.scrollToBottom();
+    // typed here rather than into the grid: a panned wide grid comes back to the cursor all the same
+    pannedXRef.current = false;
     return sent.then((result) => (result.ok ? true : submitNote(result.code, result.message)));
   }, []);
 
@@ -1568,6 +1645,7 @@ export function PaneTerminal({
     if (!socket || pane === null || !socket.connected) return false;
     const sent = socket.sendInput(pane, "\r");
     termRef.current?.scrollToBottom();
+    pannedXRef.current = false;
     return sent;
   }, []);
 

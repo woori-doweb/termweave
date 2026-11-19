@@ -1113,7 +1113,8 @@ button {
 
 /* ---------- mobile: sidebar becomes a drawer ---------- */
 
-@media (max-width: 768px) {
+/* narrow screens, and a phone turned sideways (wide but short); PHONE_DRAWER_QUERY in lib/phoneLayout.ts */
+@media (max-width: 768px), (pointer: coarse) and (max-height: 500px) {
   .drawer-toggle {
     display: inline-flex;
   }
@@ -1242,8 +1243,8 @@ button, a, [role="button"] {
 :root .dock-tab-actions { flex: 0 0 auto; flex-wrap: nowrap; }
 :root .dock-tab-actions .dock-add, :root .dock-tab-actions .dock-delete { font-size: 0; gap: 0; padding-inline: 8px; }
 
-/* phones: each bar is also shorter */
-@media (max-width: 640px) {
+/* phones, and a phone turned sideways (wide but short): each bar is also shorter */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   :root .dock-tabs { flex-wrap: nowrap; }
   :root .dock-tab-strip { flex: 1 1 auto; height: 36px; }
   :root .dock-tab-strip button { height: 30px; min-height: 30px; }
@@ -1264,7 +1265,7 @@ button, a, [role="button"] {
 .header-more-wrap { display: contents; }
 .header-more { display: none; position: relative; margin-left: auto; }
 .header-more-dot { position: absolute; top: 4px; right: 4px; display: flex; }
-@media (max-width: 640px) {
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   .header-more-wrap { display: block; margin-left: auto; }
   .header-more { display: inline-flex; }
   :root .app-header:has(.frontend-controls) { flex-wrap: nowrap; }
