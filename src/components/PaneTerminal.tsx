@@ -325,6 +325,8 @@ export function PaneTerminal({
   const inputLine = !directTyping && !chatView;
   const inputLineRef = useRef(inputLine);
   inputLineRef.current = inputLine;
+  /** the input line's break (TerminalInput), for the key bar's Enter */
+  const lineBreakRef = useRef<(() => void) | null>(null);
   // input typed while disconnected, held for the user to review and send
   const [draftState, setDraftState] = useState<{ owner: string | null; value: InputDraft }>({ owner: null, value: EMPTY_DRAFT });
   const draft = draftState.value;
@@ -1559,6 +1561,12 @@ export function PaneTerminal({
 
   // key-bar taps go through xterm so the onData -> socket path above is reused
   const pressKey = useCallback((key: KeyBarKey) => {
+    // with the input line, Enter breaks its line (a keyboard such as Samsung's Cheonjiin has no
+    // Enter of its own): the line's send button sends it. It commits an open syllable first.
+    if (key === "Enter" && inputLineRef.current && lineBreakRef.current) {
+      lineBreakRef.current();
+      return;
+    }
     const term = termRef.current;
     if (!term) return;
     if (composingRef.current) return;
@@ -1930,8 +1938,8 @@ export function PaneTerminal({
           onUploadImage={uploadImage}
         />
       )}
-      {paneId !== null && !secretActive && !observing && !ended && inputLine && <TerminalInput key={paneId} owner={paneStorageId(machineId, paneId)} paneId={paneId} onComposing={setComposing} connected={connected && !held} onSend={sendTerminalLine} onEnter={pressEnter} />}
-      {paneId !== null && !secretActive && !observing && !chatView && <KeyBar disabled={composing} onKey={pressKey} ctrlArmed={ctrlArmed} onToggleCtrl={toggleCtrl}
+      {paneId !== null && !secretActive && !observing && !ended && inputLine && <TerminalInput key={paneId} owner={paneStorageId(machineId, paneId)} paneId={paneId} onComposing={setComposing} connected={connected && !held} onSend={sendTerminalLine} onEnter={pressEnter} lineBreakRef={lineBreakRef} />}
+      {paneId !== null && !secretActive && !observing && !chatView && <KeyBar disabled={composing} enterDisabled={composing && !inputLine} onKey={pressKey} ctrlArmed={ctrlArmed} onToggleCtrl={toggleCtrl}
         {...(coarse ? { directTyping, onToggleDirect: toggleDirect } : {})} />}
     </div>
   );

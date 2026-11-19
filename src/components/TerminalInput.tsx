@@ -19,6 +19,8 @@ export interface TerminalInputProps {
   onSend: (text: string) => false | Promise<true | string>;
   /** an empty line's send: Enter alone, for a menu's default or a prompt that asks to continue */
   onEnter: () => boolean;
+  /** set to this line's break: the key bar's Enter calls it (a keyboard such as Samsung's Cheonjiin has no Enter) */
+  lineBreakRef?: { current: (() => void) | null };
 }
 
 /** Lines the box grows to before it scrolls. */
@@ -30,7 +32,7 @@ const MAX_ROWS = 4;
  * cannot take back keys it already sent: every revision arrived as more text. Here the line
  * is written with the keyboard's own editing and goes to the pane whole, then Enter.
  */
-export function TerminalInput({ owner, paneId, connected, onSend, onEnter, onComposing }: TerminalInputProps) {
+export function TerminalInput({ owner, paneId, connected, onSend, onEnter, onComposing, lineBreakRef }: TerminalInputProps) {
   const t = useT();
   const text = useSyncExternalStore(subscribeTerminalDraft, () => readTerminalDraft(owner));
   const setText = useCallback((value: string | ((previous: string) => string)) => {
@@ -114,25 +116,58 @@ export function TerminalInput({ owner, paneId, connected, onSend, onEnter, onCom
 
   // A phone keyboard keeps the last syllable open, and the button keeps focus in the box, so a
   // tap on Send arrived mid-composition and was dropped. Commit the syllable first, then send.
+  // The key bar's Enter waits for the same commit before it breaks the line.
   const sendLatest = useRef(send);
   sendLatest.current = send;
-  const sendAfterCommit = useRef(false);
+  const afterCommit = useRef<(() => void) | null>(null);
   const finishCommitSend = useCallback(() => {
-    if (!sendAfterCommit.current) return;
-    sendAfterCommit.current = false;
+    const action = afterCommit.current;
+    if (!action) return;
+    afterCommit.current = null;
     composing.current = false;
     composingCallback.current?.(false);
-    setTimeout(() => sendLatest.current(), 0); // after the commit's input event
+    setTimeout(action, 0); // after the commit's input event
   }, []);
-  const onSendClick = (): void => {
-    if (!composing.current) { send(); return; }
-    sendAfterCommit.current = true;
+  const commitThen = (action: () => void): void => {
+    if (!composing.current) { action(); return; }
+    afterCommit.current = action;
     const element = box.current;
     element?.blur(); // ends the composition: compositionend, then the committed text
     element?.focus({ preventScroll: true });
-    // ponytail: a keyboard that never reports compositionend on blur sends what the box shows
+    // ponytail: a keyboard that never reports compositionend on blur goes on with what the box shows
     setTimeout(finishCommitSend, 250);
   };
+  const onSendClick = (): void => commitThen(() => sendLatest.current());
+
+  // a line break at the caret, as Shift+Enter makes: the line goes to the pane whole, breaks included
+  const breakLine = (): void => {
+    const element = box.current;
+    if (!element) return;
+    const value = readTerminalDraft(owner);
+    const start = Math.min(element.selectionStart ?? value.length, value.length);
+    const end = Math.max(start, Math.min(element.selectionEnd ?? start, value.length));
+    const next = `${value.slice(0, start)}\n${value.slice(end)}`;
+    if (next.length > TERMINAL_LINE_LIMIT) return;
+    textRef.current = next;
+    setText(next);
+    setNote(null);
+    // typing goes on on the new line: the box keeps (or takes) the keyboard
+    if (document.activeElement !== element) element.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      element.selectionStart = element.selectionEnd = start + 1;
+      if (start + 1 === next.length) element.scrollTop = element.scrollHeight;
+    });
+  };
+  const breakLineLatest = useRef(breakLine);
+  breakLineLatest.current = breakLine;
+  const commitThenLatest = useRef(commitThen);
+  commitThenLatest.current = commitThen;
+  useEffect(() => {
+    if (!lineBreakRef) return;
+    const handler = (): void => commitThenLatest.current(() => breakLineLatest.current());
+    lineBreakRef.current = handler;
+    return () => { if (lineBreakRef.current === handler) lineBreakRef.current = null; };
+  }, [lineBreakRef]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     // Enter sends; Shift+Enter breaks the line; an IME keeps its Enter, including the committing
