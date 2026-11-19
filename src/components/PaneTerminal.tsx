@@ -132,9 +132,10 @@ function useCoarsePointer(): boolean {
 }
 
 /**
- * Fits this browser's own grid to the mount, as the fit addon does, except that a touch screen's
- * grid is never narrower than TOUCH_MIN_COLS (touchGrid.ts): a wider grid overflows the mount,
- * which pans it (data-wide-grid). Throws where fit() does, while the mount is not laid out.
+ * Fits this browser's own grid to the mount, as the fit addon does, except that a touch screen
+ * held sideways gets TOUCH_LANDSCAPE_COLS (touchGrid.ts): the wider grid overflows the mount,
+ * which pans it (data-wide-grid). Held upright it fits, every edge in sight. Throws where fit()
+ * does, while the mount is not laid out.
  */
 function fitGrid(fit: FitAddon, term: Terminal, host: HTMLElement | null, touch: boolean): void {
   const proposed = fit.proposeDimensions();
@@ -142,7 +143,9 @@ function fitGrid(fit: FitAddon, term: Terminal, host: HTMLElement | null, touch:
     fit.fit();
     return;
   }
-  const grid = touchGrid(proposed, touch);
+  const grid = touchGrid(proposed, touch && window.matchMedia("(orientation: landscape)").matches);
+  // turned upright again: a pan left over would hide the grid's left columns behind overflow: hidden
+  if (host?.hasAttribute("data-wide-grid") && !grid.wide) host.scrollLeft = 0;
   host?.toggleAttribute("data-wide-grid", grid.wide);
   if (!grid.wide) fit.fit();
   else if (term.cols !== grid.cols || term.rows !== grid.rows) term.resize(grid.cols, grid.rows);

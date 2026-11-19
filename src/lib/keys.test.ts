@@ -36,9 +36,12 @@ describe("isPrintable", () => {
 });
 
 describe("keySequence", () => {
-  it("sends the fixed bytes for Escape, Tab and Ctrl+C", () => {
+  it("sends the fixed bytes for Escape, Tab, Enter and Ctrl+C", () => {
     expect(keySequence("Escape", false)).toBe("\u001b");
     expect(keySequence("Tab", false)).toBe("\t");
+    // a terminal's Enter is CR, in either cursor mode
+    expect(keySequence("Enter", false)).toBe("\r");
+    expect(keySequence("Enter", true)).toBe("\r");
     expect(keySequence("ctrl-c", true)).toBe("\u0003");
   });
 

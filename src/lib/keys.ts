@@ -5,7 +5,7 @@
  */
 
 /** Keys a soft keyboard has no room for; ctrl-c is a chord, the rest are DOM key names. */
-export type KeyBarKey = "Escape" | "Tab" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "ctrl-c";
+export type KeyBarKey = "Escape" | "Tab" | "Enter" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "ctrl-c";
 
 /** A single printable character: what the one-shot Control modifier consumes. */
 export function isPrintable(data: string): boolean {
@@ -31,6 +31,8 @@ export function keySequence(key: KeyBarKey, applicationCursorKeys: boolean): str
       return "\u001b";
     case "Tab":
       return "\t";
+    case "Enter":
+      return "\r";
     case "ctrl-c":
       return "\u0003";
     case "ArrowUp":

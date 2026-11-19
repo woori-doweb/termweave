@@ -429,6 +429,7 @@ export const ZH: Record<string, string> = {
   "Left": "左",
   "Right": "右",
   "Control C": "Control C",
+  "Enter": "回车",
 
   // ---- prompt card ----
   "Submit": "提交",

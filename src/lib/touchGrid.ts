@@ -1,23 +1,21 @@
 /**
- * A phone's own grid: the mount of a phone held upright fits about fifty columns, and a
- * program that lays out a table for that width squeezes it unreadable. On a touch screen
- * the grid keeps a minimum width instead, and the finger pans across the part past the
- * mount's edge. Pure: the caller passes the fit addon's proposal and whether it is a touch screen.
+ * A phone's own grid. Held upright it fits the screen, as it always did: every edge of the
+ * terminal stays in sight. Turned sideways it is wider than the screen instead, and the finger
+ * pans across the part past the mount's edge: long lines and tables (PowerShell's `ls` with
+ * long names) keep one line each. Pure: the caller passes the fit addon's proposal and whether
+ * this is a touch screen held sideways.
  */
 
-/**
- * The narrowest grid a touch screen gets: a table such as PowerShell's `ls` keeps its
- * columns (at 51 the Name column wrapped to one letter per row), and the phone pans across it.
- */
-export const TOUCH_MIN_COLS = 100;
+/** The width a touch screen held sideways gets: well past its own (about 100 columns), so a line that long reads in one row. */
+export const TOUCH_LANDSCAPE_COLS = 160;
 
 /** How far a finger travels before its stroke is taken as across or up and down. */
 export const AXIS_LOCK_PX = 8;
 
 /** The grid for a proposed fit: wide when it is wider than the mount, which then pans. */
-export function touchGrid(proposed: { cols: number; rows: number }, touch: boolean): { cols: number; rows: number; wide: boolean } {
-  return touch && proposed.cols < TOUCH_MIN_COLS
-    ? { cols: TOUCH_MIN_COLS, rows: proposed.rows, wide: true }
+export function touchGrid(proposed: { cols: number; rows: number }, touchLandscape: boolean): { cols: number; rows: number; wide: boolean } {
+  return touchLandscape && proposed.cols < TOUCH_LANDSCAPE_COLS
+    ? { cols: TOUCH_LANDSCAPE_COLS, rows: proposed.rows, wide: true }
     : { ...proposed, wide: false };
 }
 

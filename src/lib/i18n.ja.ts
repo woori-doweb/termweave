@@ -427,6 +427,7 @@ export const JA: Record<string, string> = {
   "Left": "左",
   "Right": "右",
   "Control C": "Control C",
+  "Enter": "エンター",
 
   // ---- prompt card ----
   "Submit": "送信",
